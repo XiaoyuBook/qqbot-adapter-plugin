@@ -39,13 +39,15 @@ test('boolean quote uses passive context, third options still guarded after Miao
   assert.equal(f.api.calls.length, 2); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS');
   const ok = await e.reply('plain', false, {}); assert.ok(ok.message_id); assert.equal(f.api.calls.at(-1).body.content, 'plain');
 });
-test('legacy C2C self mention is redundant, unrelated/group mentions remain unsupported', async () => {
-  const f = fixture(); const e = await f.mapper.dispatch(payload('c2c'));
-  const result = await e.reply([{ type: 'at', qq: e.user_id }, 'QR', { type: 'image', file: png }]);
-  assert.ok(result.message_id); assert.deepEqual(result.warnings, ['private_self_mention_omitted']); assert.equal(f.api.calls[1].body.content, 'QR');
-  assert.equal(await e.reply([{ type: 'at', qq: 'other-user' }, 'no']), false);
-  const g = await f.mapper.dispatch(payload('group'));
-  assert.equal(await g.reply([{ type: 'at', qq: g.user_id }, 'no']), false);
+test('legacy self mention works in private and group passive replies; unrelated/all mentions fail', async () => {
+  for (const scope of ['c2c', 'group']) {
+    const f = fixture(); const e = await f.mapper.dispatch(payload(scope));
+    const result = await e.reply([{ type: 'at', qq: 0, id: e.user_id }, 'QR', { type: 'image', file: png }]);
+    assert.ok(result.message_id); assert.deepEqual(result.warnings, [`${scope === 'group' ? 'group' : 'private'}_self_mention_omitted`]);
+    assert.equal(f.api.calls[1].body.content, 'QR'); assert.equal(f.api.calls[1].body.msg_id, 'trigger-id');
+    assert.equal(await e.reply([{ type: 'at', qq: 'other-user' }, 'no']), false);
+    assert.equal(await e.reply([{ type: 'at', qq: 'all' }, 'no']), false);
+  }
 });
 test('delayed recall returns false with diagnostics and no extra passive slot or timer throw', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload('c2c'));

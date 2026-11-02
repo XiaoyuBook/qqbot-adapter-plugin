@@ -37,7 +37,7 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
   const userIds = [];
   const noteUser = { async create(e) { userIds.push(e.user_id); return undefined; } };
   const handler = { has: () => false, call: () => {}, callAll: () => {}, add: () => {} };
-  const context = vm.createContext({ Bot: bot, logger, redis, Buffer, process: { platform: process.platform, cwd: process.cwd.bind(process) }, console, setTimeout, clearTimeout, setInterval, clearInterval });
+  const context = vm.createContext({ Bot: bot, logger, redis, Buffer, segment, process: { platform: process.platform, cwd: process.cwd.bind(process) }, console, setTimeout, clearTimeout, setInterval, clearInterval });
   context.global = context;
   const modules = new Map();
   function synthetic(id, exports) {
@@ -64,6 +64,7 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
       if (/config\/init.js$/.test(resolved)) return synthetic('cfg-init', {});
       if (/handler.js$/.test(resolved)) return synthetic('handler', { default: handler });
       if (/NoteUser.js$/.test(resolved)) return synthetic('noteUser', { default: noteUser });
+      if (/renderer\/loader.js$/.test(resolved)) return synthetic('renderer-loader', { default: { getRenderer: () => ({ render: async () => { throw new Error('No browser renderer allowed in the host harness'); } }) } });
       if (/mysInfo.js$/.test(resolved)) return synthetic('mysInfo', { default: { initCache: async () => {} } });
       return synthetic(resolved, { default: {} });
     });

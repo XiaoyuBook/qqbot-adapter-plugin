@@ -9,7 +9,8 @@
       "lib/events/message.js": "47658a4f597bb90911b514e16a14d95434d2f3d8abac12119b80271012cebe82",
       "lib/listener/listener.js": "021fd4b3e00ed77a703a8e32cfacb719a002c9355980c838299d610da922c71b",
       "lib/listener/loader.js": "16882489974d9088070e911440218b6fb9df5931ac1977f1416b417428edcf90",
-      "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3"
+      "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3",
+      "lib/puppeteer/puppeteer.js": "c489acb44799fb56c64b8c87e8bb9bdce4264df5591a3999ebd6c1f82294e6c2"
     }
   },
   "xiaoyao": {
@@ -21,7 +22,8 @@
       "model/mhyTopUpLogin.js": "fe87c3525b2647a95d0bc865851d371cbabce6c877fa2aa5ee8e2b509075775a",
       "components/Common.js": "8bc2e18c2a08d7bd089bfa2d9355bef702dbe2a79be8271ab279d16f966b4cda",
       "model/mys/utils.js": "8dd7d184d5373c44d36a603db208bac0adda94f3fe317f86d14f6dc55a35c9cd",
-      "model/mys/mihoyoApi.js": "27953c219d709fbdb24d2afa7dbd511987b00a17b10b93cfb5e92e4d12fb7ad7"
+      "model/mys/mihoyoApi.js": "27953c219d709fbdb24d2afa7dbd511987b00a17b10b93cfb5e92e4d12fb7ad7",
+      "adapter/render.js": "849a3b9e318bdb2081abbd7a48805f2101a9fe31d83fc34d94707c6e68c60904"
     }
   },
   "napcat": {

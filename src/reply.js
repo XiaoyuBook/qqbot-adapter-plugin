@@ -44,8 +44,10 @@ async function messageParts(message, config, context) {
     let text;
     if (typeof item === 'string') text = item;
     else if (item?.type === 'text' && typeof item.text === 'string') text = item.text;
-    else if (item?.type === 'at' && context.scope === 'c2c' && context.senderId && String(item.id ?? item.qq) === context.senderId) {
-      context.warn('private_self_mention_omitted');
+    else if (item?.type === 'at' && context.senderId && String(item.id ?? item.qq) === context.senderId) {
+      // The passive response is already bound to this sender's trigger. Old QR
+      // plugins add the same @ marker in both group chat and private chat.
+      context.warn(`${context.scope === 'group' ? 'group' : 'private'}_self_mention_omitted`);
       continue;
     } else if (Buffer.isBuffer(item) || item instanceof Uint8Array || item?.type === 'image') {
       parts.push({ image: await imageSource(item?.type === 'image' ? (item.file ?? item.url) : item, config.maxImageBytes) });

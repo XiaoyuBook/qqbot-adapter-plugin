@@ -8,7 +8,7 @@ import { harness, source } from './harness.js';
 import { payload, png } from '../helpers.js';
 import { patchQrLogSource } from '../../scripts/prepare-qr-log-patch.mjs';
 
-async function qrModules({ event, timers, logs, Model }) {
+async function qrModules({ event, timers, logs, Model, renders = [] }) {
   const redisData = new Map();
   const context = vm.createContext({ Buffer, console, segment, process: { cwd: () => '/isolated' }, Bot: { logger: { mark: value => logs.push(value) } }, redis: { get: async key => redisData.get(key) ?? null, set: async (key, value) => redisData.set(key, value), del: async key => redisData.delete(key) }, setTimeout: callback => { timers.push(callback); return timers.length; } });
   const cache = new Map();
@@ -26,6 +26,17 @@ async function qrModules({ event, timers, logs, Model }) {
       if (specifier.endsWith('/index.js')) return synthetic('cfg', { Cfg: { get: () => 0, scale: () => '' } });
       if (specifier.endsWith('/Common.js')) return load('components/Common.js');
       if (specifier.endsWith('/mys/utils.js')) return load('model/mys/utils.js');
+      if (specifier === '../components/Data.js') return synthetic('data', { default: { createDir() {} } });
+      if (specifier.endsWith('/lib/puppeteer/puppeteer.js')) {
+        if (cache.has('miao-renderer')) return cache.get('miao-renderer');
+        const wrapper = new vm.SourceTextModule(await source('miao', 'lib/puppeteer/puppeteer.js'), { context });
+        cache.set('miao-renderer', wrapper);
+        await wrapper.link(specifier => {
+          assert.equal(specifier, '../renderer/loader.js');
+          return synthetic('renderer-backend', { default: { getRenderer: () => ({ render: async (name, data) => { renders.push({ name, data }); return png; } }) } });
+        });
+        await wrapper.evaluate(); return wrapper;
+      }
       if (specifier.endsWith('/mhyTopUpLogin.js')) return synthetic('model', { default: Model });
       if (specifier === './user.js') return synthetic('user', { bindStoken: async () => { throw new Error('No real account binding allowed in tests'); }, default: Model });
       throw new Error(`Unexpected QR fixture import: ${specifier}`);
@@ -35,28 +46,32 @@ async function qrModules({ event, timers, logs, Model }) {
   return { context, load, event };
 }
 
-test('actual Xiaoyao QR handler + renderer + delayed recall work through real Miao without losing QR', async t => {
-  const f = await harness(t); const timers = [], logs = [];
+for (const scope of ['c2c', 'group']) test(`actual ${scope} QR handler, renderer wrappers and delayed recall retain QR through real Miao`, async t => {
+  const f = await harness(t); const timers = [], logs = [], renders = [];
   class FakeMys {
     constructor(e) { this.e = e; }
     async qrCodeLogin() { await this.e.reply('Test login notice', true); return { data: { url: 'https://example.test/FAKE_QR', ticket: 'FAKE_TICKET' } }; }
     async GetQrCode() { return false; }
   }
-  const modules = await qrModules({ timers, logs, Model: FakeMys });
+  const modules = await qrModules({ timers, logs, renders, Model: FakeMys });
   const app = await modules.load('apps/mhyTopUpLogin.js');
+  const renderer = await modules.load('adapter/render.js');
   let runs = 0;
   class QRProbe extends f.Plugin {
     constructor() { super({ name: 'isolated-qr', event: 'message.*', rule: [{ reg: app.namespace.rule.qrCodeLogin.reg, fnc: 'run', log: false }] }); }
-    async run(e) { runs++; return app.namespace.qrCodeLogin(e, { render: async () => ({ type: 'image', file: png }) }); }
+    async run(e) { runs++; return app.namespace.qrCodeLogin(e, { render: renderer.namespace.render }); }
   }
   await f.loader.loadPlugin({ name: 'isolated-qr' }, QRProbe);
-  const event = await f.mapper.dispatch(payload('c2c', { content: '#扫码绑定' })); await f.flush();
+  const event = await f.mapper.dispatch(payload(scope, { content: '#扫码绑定' })); await f.flush();
   assert.equal(runs, 1); assert.equal(timers.length, 1);
   const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
   assert.equal(messages.length, 2); assert.equal(messages[0].body.msg_type, 0); assert.equal(messages[1].body.msg_type, 7);
   assert.equal(messages[1].body.content.includes('请扫码'), true);
-  assert.equal(event.qqbot.compatibility.includes('private_self_mention_omitted'), true);
+  assert.equal(event.qqbot.compatibility.includes(`${scope === 'group' ? 'group' : 'private'}_self_mention_omitted`), true);
   assert.equal(event.qqbot.compatibility.includes('quote_display_unavailable'), true);
+  assert.equal(event.qqbot.lastError, null);
+  assert.equal(renders.length, 1); assert.equal(renders[0].name, 'xiaoyao-cvs-plugin/qrCode/index');
+  assert.equal(renders[0].data.imgType, 'png'); assert.equal(renders[0].data.url, 'https://example.test/FAKE_QR');
   assert.doesNotThrow(() => timers[0]());
   await event.reply('after timer'); assert.equal(event.qqbot.lastError.code, 'UNSUPPORTED_API');
 });
