@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { imageSource, PassiveReply } from '../src/reply.js';
 import { AdapterError } from '../src/errors.js';
-import { fixture, payload, png, fakeApi, config, quietLogger } from './helpers.js';
+import { fixture, payload, png, fakeApi, config, quietLogger, FakeTimers } from './helpers.js';
 
 test('text, native segment array, Buffer image upload, srv_send_msg=false and linked msg_seq', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload());
@@ -28,31 +28,34 @@ test('reject non-image local data, oversized images, invalid URL and arbitrary o
 });
 test('unsupported mixed arrays preflight before sending text; one honest feedback and false', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload());
-  for (const message of [['should-not-send', { type: 'video', file: 'anything' }], { type: 'node', data: [] }, { type: 'at', qq: '123' }, { type: 'button', data: [] }]) assert.equal(await e.reply(message), false);
-  assert.equal(f.api.calls.length, 1); assert.match(f.api.calls[0].body.content, /仅支持文本和图片/); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_MESSAGE');
+  for (const message of [['should-not-send', { type: 'xml', data: 'anything' }], { type: 'node', data: [] }, { type: 'at', qq: '123' }, { type: 'location', data: [] }]) assert.equal(await e.reply(message), false);
+  assert.equal(f.api.calls.length, 1); assert.match(f.api.calls[0].body.content, /消息格式无效/); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_MESSAGE');
 });
-test('boolean quote uses passive context, third options still guarded after Miao wrapper', async () => {
-  const f = fixture(); const e = await f.mapper.dispatch(payload()); const original = e.reply;
+test('boolean quote fallback and native recall options survive the Miao wrapper', async () => {
+  const timers = new FakeTimers(); const f = fixture({}, { timers }); const e = await f.mapper.dispatch(payload()); const original = e.reply;
   e.reply = async (message, quote, _data = {}) => original(message, quote);
   const quoted = await e.reply('quote', true); assert.ok(quoted.message_id); assert.deepEqual(quoted.warnings, ['quote_display_unavailable']);
-  assert.equal(await e.reply('button', false, { button: [] }), false); assert.equal(await e.reply('recall', false, { recallMsg: 1 }), false);
-  assert.equal(f.api.calls.length, 2); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS');
+  assert.equal(await e.reply('button', false, { button: [] }), false); assert.ok((await e.reply('recall', false, { recallMsg: 1 })).message_id);
+  assert.equal(f.api.calls.length, 3); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS');
   const ok = await e.reply('plain', false, {}); assert.ok(ok.message_id); assert.equal(f.api.calls.at(-1).body.content, 'plain');
+  await timers.tick(1000); assert.equal(f.api.calls.at(-1).method, 'DELETE'); f.registry.dispose();
 });
-test('legacy self mention works in private and group passive replies; unrelated/all mentions fail', async () => {
+test('legacy self mention works in both scopes; invalid IDs fail and group all is native', async () => {
   for (const scope of ['c2c', 'group']) {
     const f = fixture(); const e = await f.mapper.dispatch(payload(scope));
     const result = await e.reply([{ type: 'at', qq: 0, id: e.user_id }, 'QR', { type: 'image', file: png }]);
     assert.ok(result.message_id); assert.deepEqual(result.warnings, [`${scope === 'group' ? 'group' : 'private'}_self_mention_omitted`]);
     assert.equal(f.api.calls[1].body.content, 'QR'); assert.equal(f.api.calls[1].body.msg_id, 'trigger-id');
     assert.equal(await e.reply([{ type: 'at', qq: 'other-user' }, 'no']), false);
-    assert.equal(await e.reply([{ type: 'at', qq: 'all' }, 'no']), false);
+    const everyone = await e.reply([{ type: 'at', qq: 'all' }, 'announcement']);
+    if (scope === 'group') { assert.ok(everyone.message_id); assert.match(f.api.calls.at(-1).body.markdown.content, /<qqbot-at-everyone \/>/); }
+    else assert.equal(everyone, false);
   }
 });
-test('delayed recall returns false with diagnostics and no extra passive slot or timer throw', async () => {
+test('recall uses DELETE without consuming a passive reply slot or reporting unsupported', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload('c2c'));
-  assert.equal(await e.friend.recallMsg('sent-id'), false); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_API');
-  assert.equal(f.api.calls.length, 0); assert.match(e.qqbot.lastError.message, /未实现此能力/);
+  assert.equal(await e.friend.recallMsg('sent-id'), true); assert.equal(e.qqbot.lastError, null);
+  assert.equal(f.api.calls.length, 1); assert.equal(f.api.calls[0].method, 'DELETE'); assert.equal(f.api.calls[0].route, '/v2/users/c2c-openid/messages/sent-id');
 });
 test('concurrent replies serialize same trigger seq, no retry after ambiguous delivery', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload('c2c')); await Promise.all([e.reply('one'), e.friend.sendMsg('two'), e.reply('three')]);
@@ -82,5 +85,5 @@ test('missing upload result or platform failure never claims image success or au
 });
 test('unsupported contact APIs raise explicit safe errors', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload());
-  for (const fn of [() => e.getAvatarUrl(), () => e.group.muteMember(), () => e.group.getMemberMap(), () => e.member.getChatHistory(), () => e.bot.sendGroupMsg(e.group_id, 'proactive')]) assert.throws(fn, error => ['UNSUPPORTED_API', 'PASSIVE_ONLY'].includes(error.code));
+  for (const fn of [() => e.getAvatarUrl(), () => e.group.muteAll(), () => e.member.getChatHistory(), () => e.bot.sendGroupMsg(e.group_id, 'proactive')]) assert.throws(fn, error => ['UNSUPPORTED_API', 'PASSIVE_ONLY'].includes(error.code));
 });

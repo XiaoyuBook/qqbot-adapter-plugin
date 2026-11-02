@@ -33,14 +33,15 @@ test('forward text and images retain order, attribution and captions in both sco
   }
 });
 
-test('forward command buttons become readable instructions, direct buttons stay rejected', async () => {
+test('forward and direct command buttons become native Markdown keyboards', async () => {
   const f = fixture(), e = await f.mapper.dispatch(payload());
   const forward = await e.bot.makeForwardMsg({ message: ['用法', { type: 'button', data: [[{ text: '查看账号', callback: '#uid' }, { text: '输入查询', input: '#查询' }], [{ text: '#uid', callback: '#uid' }]] }] });
   const result = await e.reply(forward);
-  assert.deepEqual(result.warnings, ['forward_rendered_as_messages', 'buttons_rendered_as_text']);
-  assert.match(f.api.calls[0].body.content, /查看账号：#uid/); assert.match(f.api.calls[0].body.content, /输入查询：#查询/);
-  assert.equal(await e.reply({ type: 'button', data: [[{ text: '#uid' }]] }), false);
-  assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_MESSAGE');
+  assert.deepEqual(result.warnings, ['forward_rendered_as_messages', 'buttons_rendered_as_keyboard']);
+  assert.equal(f.api.calls[0].body.msg_type, 2); assert.equal(f.api.calls[0].body.keyboard.content.rows[0].buttons[0].action.data, '#uid');
+  assert.equal(f.api.calls[0].body.keyboard.content.rows[0].buttons[1].action.data, '#查询');
+  assert.ok((await e.reply({ type: 'button', data: [[{ text: '#uid' }]] })).message_id);
+  assert.equal(e.qqbot.lastError, null);
 });
 
 test('nested forwards are snapshots and other-user mentions and invalid images preflight without partial delivery', async () => {
@@ -60,7 +61,7 @@ test('nested forwards are snapshots and other-user mentions and invalid images p
 test('malformed, recursive, oversized and unsupported forwards fail with safe bounded errors', async () => {
   const cycle = []; cycle.push(cycle);
   let deep = 'text'; for (let i = 0; i < 10; i++) deep = [deep];
-  for (const input of [[], {}, { message: cycle }, { message: { type: 'file', file: 'FAKE_SECRET_PATH' } }, { message: { type: 'button', data: [{ text: 'test', callback: { secret: 'FAKE_SECRET' } }] } }]) {
+  for (const input of [[], {}, { message: cycle }, { message: { type: 'xml', file: 'FAKE_SECRET_PATH' } }, { message: { type: 'button', data: [{ text: 'test', callback: { secret: 'FAKE_SECRET' } }] } }]) {
     await assert.rejects(makeForwardMsg(input), error => error.code === 'FORWARD_INVALID' && !error.message.includes('FAKE_SECRET'));
   }
   const tooManyButtons = { type: 'button', data: Array.from({ length: 20 }, () => Array.from({ length: 60 }, () => ({ text: '' }))) };

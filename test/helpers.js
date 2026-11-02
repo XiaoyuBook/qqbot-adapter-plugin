@@ -18,7 +18,7 @@ export const fakeApi = () => {
     route: (scope, target, resource) => `/v2/${scope === 'group' ? 'groups' : 'users'}/${target}/${resource}`,
     async request(method, route, body) {
       calls.push({ method, route, body });
-      return route.endsWith('/files') ? { file_info: 'fake-file-info', ttl: 60 } : { id: `sent-${calls.length}`, timestamp: 1 };
+      return route.endsWith('/files') ? { file_info: 'fake-file-info', ttl: 60 } : method === 'DELETE' || method === 'PUT' ? {} : { id: `sent-${calls.length}`, timestamp: 1 };
     }
   };
 };
@@ -31,10 +31,10 @@ export const payload = (scope = 'group', patch = {}) => ({
   op: 0, t: scope === 'group' ? 'GROUP_AT_MESSAGE_CREATE' : 'C2C_MESSAGE_CREATE', s: 1,
   d: { id: 'trigger-id', timestamp: new Date().toISOString(), content: ' #测试', author: scope === 'group' ? { member_openid: '12345678901234567890123456789012' } : { user_openid: 'c2c-openid' }, ...(scope === 'group' ? { group_openid: 'group-openid' } : {}), ...patch }
 });
-export function fixture(patch = {}) {
+export function fixture(patch = {}, options = {}) {
   const cfg = config(patch), bot = host(), api = fakeApi(), logger = quietLogger();
-  const registry = new AccountRegistry(bot, cfg); registry.register(); registry.setOnline(true);
-  const mapper = new EventMapper({ registry, api, config: cfg, logger });
+  const registry = new AccountRegistry(bot, cfg, { logger, ...options }); registry.register(); registry.setOnline(true);
+  const mapper = new EventMapper({ registry, api, config: cfg, logger, ...(options.now ? { now: options.now } : {}) });
   return { cfg, bot, api, logger, registry, mapper };
 }
 

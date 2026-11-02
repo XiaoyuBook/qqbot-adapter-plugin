@@ -83,7 +83,11 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
   const deal = loader.deal.bind(loader);
   loader.deal = event => { const promise = deal(event); pending.push(promise); return promise; };
   bot.on('message', event => listener.execute(event));
-  const registry = new AccountRegistry(bot, config(adapterConfig)); registry.register(); registry.setOnline(true); t.after(() => registry.dispose());
+  for (const type of ['notice', 'request']) {
+    const module = await get(`lib/events/${type}.js`); await module.evaluate();
+    const listener = new module.namespace.default(); bot.on(type, event => listener.execute(event));
+  }
+  const registry = new AccountRegistry(bot, config(adapterConfig), { segment, logger }); registry.register(); registry.setOnline(true); t.after(() => registry.dispose());
   const api = fakeApi(); const mapper = new EventMapper({ registry, api, config: config(adapterConfig), logger });
   async function flush() { await Promise.all(pending.splice(0)); }
 

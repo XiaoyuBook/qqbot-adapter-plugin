@@ -54,12 +54,15 @@ test('malformed IDs and timestamps rejected; stale replays never get fresh reply
   for (const patch of [{ author: { member_openid: 123 } }, { group_openid: '../x' }, { timestamp: 'not-date' }, { id: 123 }, { timestamp: new Date(Date.now() + 120000).toISOString() }]) await assert.rejects(f.mapper.dispatch(payload('group', patch)), { code: 'EVENT_INVALID' });
   assert.equal(await f.mapper.dispatch(payload('group', { timestamp: new Date(Date.now() - 300000).toISOString() })), false);
 });
-test('incoming images map to Miao image elements, unsupported media has explicit feedback', async () => {
+test('incoming image, voice, video and file attachments map to their native elements', async () => {
   const f = fixture();
   const image = await f.mapper.dispatch(payload('c2c', { attachments: [{ content_type: 'image/png', url: '//example.test/image.png' }] }));
   assert.equal(image.message.at(-1).url, 'https://example.test/image.png');
-  assert.equal(await f.mapper.dispatch(payload('group', { id: 'voice', content: '', attachments: [{ content_type: 'voice', url: 'https://example.test/voice' }] })), false);
-  assert.match(f.api.calls[0].body.content, /仅支持文本和图片/);
+  for (const [mime, type] of [['voice', 'record'], ['video/mp4', 'video'], ['file', 'file']]) {
+    const e = await f.mapper.dispatch(payload('group', { id: type, content: '', attachments: [{ content_type: mime, url: 'https://example.test/media', filename: 'sample', asr_refer_text: 'test voice' }] }));
+    assert.equal(e.message.at(-1).type, type);
+  }
+  assert.equal(f.api.calls.length, 0);
 });
 test('bounded replay cache expires and cannot grow without bound', () => {
   let now = 0; const dedup = new EventDeduplicator({ now: () => now, max: 2, ttlMs: 100 });

@@ -7,7 +7,7 @@ import { segment } from 'icqq';
 import { harness, source } from './harness.js';
 import { payload } from '../helpers.js';
 
-for (const scope of ['group', 'c2c']) test(`real ${scope} genshin binding and common forward helper send usage in the fifth reply`, async t => {
+for (const scope of ['group', 'c2c']) test(`real ${scope} genshin binding sends native keyboard usage within its passive limit`, async t => {
   const f = await harness(t), saved = [];
   const commonModule = await f.hostModule('lib/common/common.js'); await commonModule.evaluate();
   const user = { addMysUser: async () => saved.push('add'), save: async () => saved.push('save') };
@@ -29,7 +29,7 @@ for (const scope of ['group', 'c2c']) test(`real ${scope} genshin binding and co
   class Probe extends f.Plugin {
     constructor() { super({ name: 'binding-probe', event: 'message.*', rule: [{ reg: '^#测试$', fnc: 'run', log: false }] }); }
     async run(e) {
-      for (let i = 0; i < 3; i++) await e.reply('earlier login step');
+      for (let i = 0; i < (scope === 'group' ? 3 : 2); i++) await e.reply('earlier login step');
       e.ck = 'ltoken=FAKE_LTOKEN;ltuid=12345;cookie_token=FAKE_COOKIE;';
       await new module.namespace.default(e).bing();
       return true;
@@ -39,11 +39,13 @@ for (const scope of ['group', 'c2c']) test(`real ${scope} genshin binding and co
   const event = await f.mapper.dispatch(payload(scope)); await f.flush();
   assert.deepEqual(saved, ['add', 'save']);
   const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
-  assert.equal(messages.length, 5); assert.deepEqual(messages.map(call => call.body.msg_seq), [1, 2, 3, 4, 5]);
-  assert.match(messages[3].body.content, /绑定Cookie成功/);
-  assert.match(messages[4].body.content, /^绑定成功：使用命令说明\n/);
-  assert.match(messages[4].body.content, /【#uid】/); assert.match(messages[4].body.content, /【\*uid】/);
-  assert.equal(messages[4].body.msg_type, 0); assert.equal(event.qqbot.lastError, null);
+  const limit = scope === 'group' ? 5 : 4;
+  assert.equal(messages.length, limit); assert.deepEqual(messages.map(call => call.body.msg_seq), Array.from({ length: limit }, (_, index) => index + 1));
+  assert.match(messages.at(-2).body.content, /绑定Cookie成功/);
+  assert.match(messages.at(-1).body.markdown.content, /^绑定成功：使用命令说明\n/);
+  assert.match(messages.at(-1).body.markdown.content, /uid/);
+  assert.equal(messages.at(-1).body.keyboard.content.rows[0].buttons[0].action.data, '#uid');
+  assert.equal(messages.at(-1).body.msg_type, 2); assert.equal(event.qqbot.lastError, null);
   assert.equal(event.qqbot.compatibility.includes('forward_rendered_as_messages'), true);
   assert.equal(f.logger.records.some(line => /UNSUPPORTED_|REPLY_LIMIT/.test(line)), false);
   assert.equal(messages.some(call => /FAKE_LTOKEN|FAKE_COOKIE/.test(call.body.content)), false);

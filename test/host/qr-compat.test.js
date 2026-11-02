@@ -73,7 +73,8 @@ for (const scope of ['c2c', 'group']) test(`actual ${scope} QR handler, renderer
   assert.equal(renders.length, 1); assert.equal(renders[0].name, 'xiaoyao-cvs-plugin/qrCode/index');
   assert.equal(renders[0].data.imgType, 'png'); assert.equal(renders[0].data.url, 'https://example.test/FAKE_QR');
   assert.doesNotThrow(() => timers[0]());
-  await event.reply('after timer'); assert.equal(event.qqbot.lastError.code, 'UNSUPPORTED_API');
+  await event.reply('after timer'); assert.equal(event.qqbot.lastError, null);
+  assert.equal(f.api.calls.some(call => call.method === 'DELETE'), true);
 });
 
 test('two-line QR log sanitization preserves token result without logging credentials', async () => {

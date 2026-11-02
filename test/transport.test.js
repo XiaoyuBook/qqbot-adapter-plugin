@@ -14,7 +14,7 @@ function ready(ws, sequence = 0) { ws.frame({ op: 10, d: { heartbeat_interval: 1
 test('authenticate before first periodic heartbeat, including READY sequence 0', async t => {
   const f = await setup(); t.after(() => f.transport.stop()); ready(f.sockets[0]);
   assert.equal(f.transport.state, 'online');
-  assert.deepEqual(f.sockets[0].sent[0].d.intents, 1 << 25); assert.equal(f.sockets[0].sent[0].d.token, 'QQBot fake-token');
+  assert.deepEqual(f.sockets[0].sent[0].d.intents, (1 << 25) | (1 << 26)); assert.equal(f.sockets[0].sent[0].d.token, 'QQBot fake-token');
   assert.equal(f.sockets[0].sent.length, 1); await f.timers.tick(1000); assert.deepEqual(f.sockets[0].sent.at(-1), { op: 1, d: 0 });
 });
 test('gateway that ignores pre-READY heartbeat remains connected over repeated ACK cycles', async t => {

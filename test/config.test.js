@@ -45,7 +45,7 @@ test('concurrent configuration updates serialize without losing writes', async t
 });
 test('validate public fields, numeric OpenID remains string, reject unknown/prototype fields', async t => {
   assert.deepEqual(validateConfig({ masterC2COpenids: ['00123', '00123'] }).masterC2COpenids, ['00123']);
-  for (const patch of [{ appId: 123 }, { enabled: 'true' }, { appSecret: secret }, { masterGroupOpenids: [123] }, { masterC2COpenids: ['a/b'] }, { maxReplies: 6 }, { replyWindowSeconds: 300 }, { receiveC2C: false, receiveGroup: false, enabled: true, appId: '123' }, JSON.parse('{"__proto__":{}}')]) assert.throws(() => validateConfig(patch), { code: 'CONFIG_INVALID' });
+  for (const patch of [{ appId: 123 }, { enabled: 'true' }, { appSecret: secret }, { masterGroupOpenids: [123] }, { masterC2COpenids: ['a/b'] }, { maxReplies: 6 }, { replyWindowSeconds: 301 }, { c2cReplyWindowSeconds: 3601 }, { maxMediaBytes: 209715201 }, { receiveC2C: false, receiveGroup: false, enabled: true, appId: '123' }, JSON.parse('{"__proto__":{}}')]) assert.throws(() => validateConfig(patch), { code: 'CONFIG_INVALID' });
   const store = await storeFor(t);
   await assert.rejects(store.save({ appId: '123', enabled: true }), { code: 'SECRET_REQUIRED' });
   await assert.rejects(store.save({ appSecret: `${secret}\n` }), { code: 'CONFIG_INVALID' });

@@ -81,10 +81,14 @@ export async function makeForwardMsg(input) {
     } else if (typeof message === 'string') add(message);
     else if (message?.type === 'text' && typeof message.text === 'string') add(message.text);
     else if (Buffer.isBuffer(message) || message instanceof Uint8Array) add(message);
-    else if (message?.type === 'image') add({ type: 'image', file: message.file ?? message.url });
+    else if (['image', 'record', 'audio', 'video', 'file'].includes(message?.type)) add({ type: message.type, file: message.file ?? message.url, name: message.name });
+    else if (['markdown', 'keyboard', 'card', 'media'].includes(message?.type)) add({ ...message });
     else if (message?.type === 'at') add({ type: 'at', qq: message.qq, id: message.id });
     else if (message?.type === 'button') {
-      add(buttonsAsText(message, visit)); warnings.add('buttons_rendered_as_text');
+      // Validate the legacy shape and bound its payload, but retain the keyboard
+      // for the native sender. It is no longer flattened into plain commands.
+      buttonsAsText(message, visit);
+      add(structuredClone(message)); warnings.add('buttons_rendered_as_keyboard');
     } else invalid();
   }
   for (const [index, node] of nodes.entries()) {

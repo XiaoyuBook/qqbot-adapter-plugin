@@ -45,7 +45,7 @@ test('real Miao blacklist / whitelist and group-only-at filters work with namesp
 test('real Miao wrapper keeps boolean quote compatibility and rejects button/at/recall options', async t => {
   const f = await harness(t); const results = [];
   await probe(f, { execute: async e => {
-    results.push(await e.reply('no', false, { button: [] })); results.push(await e.reply('no', false, { at: true })); results.push(await e.reply('no', false, { recallMsg: 10 })); results.push(await e.reply('no', true)); results.push(await e.reply('ok'));
+    results.push(await e.reply('no', false, { button: [] })); results.push(await e.reply('no', false, { at: { bad: true } })); results.push(await e.reply('no', false, { recallMsg: 121 })); results.push(await e.reply('no', true)); results.push(await e.reply('ok'));
   } });
   const e = await f.mapper.dispatch(payload()); await f.flush();
   assert.deepEqual(results.slice(0, 3), [false, false, false]); assert.ok(results[3].message_id); assert.ok(results[4].message_id); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS'); assert.equal(f.api.calls.length, 3);

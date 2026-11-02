@@ -110,7 +110,7 @@ export class GatewayTransport {
               this.#clear('handshake');
               this.#timer('identify', this.config.requestTimeoutMs, () => { if (current()) this.#retry({ reason: 'ready_timeout' }); });
               if (this.sessionId && this.sequence !== null) this.#send({ op: 6, d: { token: `QQBot ${token}`, session_id: this.sessionId, seq: this.sequence } });
-              else this.#send({ op: 2, d: { token: `QQBot ${token}`, intents: 1 << 25, shard: [0, 1], properties: { $os: process.platform, $browser: 'qqbot-adapter-plugin', $device: 'qqbot-adapter-plugin' } } });
+              else this.#send({ op: 2, d: { token: `QQBot ${token}`, intents: (1 << 25) | (1 << 26) | (this.config.receiveGroupNotices ? 1 << 24 : 0), shard: [0, 1], properties: { $os: process.platform, $browser: 'qqbot-adapter-plugin', $device: 'qqbot-adapter-plugin' } } });
               const beat = () => {
                 if (!current()) return;
                 if (this.pendingAck) { this.#retry({ reason: 'heartbeat_timeout' }); return; }

@@ -3,6 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { AdapterError, logFailure, safeError } from './errors.js';
 import { isForwardMessage, forwardContent } from './forward.js';
+import { prepareMedia, uploadMedia } from './media.js';
+import { markdown, keyboard, card, keyboardText } from './rich.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const optionContext = new AsyncLocalStorage();
+const escapeMarkdown = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#+.!~|])/g, '\\$1');
 
 function imageUrl(value) {
   try {
@@ -46,52 +52,86 @@ async function messageParts(message, config, context) {
     forward.warnings.forEach(context.warn);
     return forward.items;
   });
+  if (input.length > 1000) throw new AdapterError('UNSUPPORTED_MESSAGE');
   const parts = [];
+  let buttons = context.extra?.keyboard ?? context.extra?.button;
+  if (context.extra?.at) input = [{ type: 'at', qq: context.extra.at === true ? context.senderId : context.extra.at }, ...input];
+  let text = '', richText = '', rich = false;
+  function flush() {
+    if (!text && !richText) return;
+    if (rich) parts.push({ body: { msg_type: 2, markdown: markdown(richText) } });
+    else {
+      const chars = Array.from(text);
+      for (let index = 0; index < chars.length; index += 1500) parts.push({ text: chars.slice(index, index + 1500).join('') });
+    }
+    text = ''; richText = ''; rich = false;
+  }
+  function append(value) { text += value; richText += escapeMarkdown(value); }
   for (const item of input) {
-    let text;
-    if (typeof item === 'string') text = item;
-    else if (item?.type === 'text' && typeof item.text === 'string') text = item.text;
+    if (typeof item === 'string') append(item);
+    else if (item?.type === 'text' && typeof item.text === 'string') append(item.text);
     else if (item?.type === 'at' && context.senderId && String(item.id ?? item.qq) === context.senderId) {
       // The passive response is already bound to this sender's trigger. Old QR
       // plugins add the same @ marker in both group chat and private chat.
       context.warn(`${context.scope === 'group' ? 'group' : 'private'}_self_mention_omitted`);
       continue;
-    } else if (Buffer.isBuffer(item) || item instanceof Uint8Array || item?.type === 'image') {
-      parts.push({ image: await imageSource(item?.type === 'image' ? (item.file ?? item.url) : item, config.maxImageBytes) });
-      continue;
+    } else if (item?.type === 'at') {
+      if (context.scope !== 'group') throw new AdapterError('UNSUPPORTED_MESSAGE');
+      const id = item.id ?? item.qq;
+      if (id === 'all') richText += '<qqbot-at-everyone />';
+      else {
+        const openid = item.openid !== undefined && /^[A-Za-z0-9_-]{1,128}$/.test(item.openid) ? item.openid : context.registry?.openid(id, 'group-user');
+        if (!openid) throw new AdapterError('UNSUPPORTED_MESSAGE');
+        richText += `<qqbot-at-user id="${openid}" />`;
+      }
+      rich = true;
+    } else if (Buffer.isBuffer(item) || item instanceof Uint8Array || ['image', 'record', 'audio', 'video', 'file'].includes(item?.type)) {
+      flush(); const kind = item?.type === 'audio' ? 'record' : item?.type ?? 'image';
+      parts.push({ media: await prepareMedia(kind, item?.type ? (item.file ?? item.url) : item, config, item?.name) });
+    } else if (item?.type === 'media' && typeof item.file_info === 'string' && item.file_info && item.file_info.length <= 65536) {
+      flush(); parts.push({ body: { msg_type: 7, media: { file_info: item.file_info }, content: ' ' } });
+    } else if (item?.type === 'markdown') {
+      flush(); parts.push({ body: { msg_type: 2, markdown: markdown(item.data ?? item.content) } });
+    } else if (item?.type === 'button' || item?.type === 'keyboard') {
+      if (buttons !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
+      buttons = item.data;
+    } else if (item?.type === 'card') { flush(); parts.push({ body: { msg_type: 8, card: card(item.data ?? item.card) } }); }
+    else if (item?.type === 'reply') {
+      if (context.quote !== false && context.quote !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
+      context.quote = { message_id: item.id };
     } else throw new AdapterError('UNSUPPORTED_MESSAGE');
-    if (!text) continue;
-    const previous = parts.at(-1);
-    if (previous?.text !== undefined) previous.text += text;
-    else parts.push({ text });
   }
-  const output = [];
-  for (const part of parts) {
-    if (part.image) output.push(part);
-    else {
-      const chars = Array.from(part.text);
-      for (let i = 0; i < chars.length; i += 1500) output.push({ text: chars.slice(i, i + 1500).join('') });
-    }
-  }
-  if (!output.length) throw new AdapterError('UNSUPPORTED_MESSAGE');
+  flush();
   // A caption and the following image are one QQ media message. This also
   // avoids consuming two of the platform's five passive replies for one QR.
   const combined = [];
-  for (const part of output) {
-    if (part.image && combined.at(-1)?.text !== undefined && !combined.at(-1)?.image) combined.push({ ...part, text: combined.pop().text });
+  for (const part of parts) {
+    if (part.media && combined.at(-1)?.text !== undefined && !combined.at(-1)?.media) combined.push({ ...part, text: combined.pop().text });
     else combined.push(part);
   }
+  if (buttons !== undefined) {
+    const native = keyboard(buttons, context.scope), last = combined.at(-1);
+    if (last?.text !== undefined && !last.media) { last.body = { msg_type: 2, markdown: markdown(escapeMarkdown(last.text)), keyboard: native }; delete last.text; }
+    else if (last?.body?.msg_type === 2) last.body.keyboard = native;
+    else combined.push({ body: { msg_type: 2, markdown: markdown('请选择操作'), keyboard: native } });
+  }
+  if (!combined.length) throw new AdapterError('UNSUPPORTED_MESSAGE');
   return combined;
 }
 
 function validateOptions(quote, extra) {
-  if (quote !== undefined && quote !== null && typeof quote !== 'boolean') throw new AdapterError('UNSUPPORTED_OPTIONS');
-  if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.entries(extra).some(([key, value]) => key !== 'recallMsg' || value !== 0))) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (quote !== undefined && quote !== null && typeof quote !== 'boolean' && (!quote || typeof quote !== 'object' || Array.isArray(quote) || !Object.keys(quote).some(key => ['message_id', 'id', 'ref_idx'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.keys(extra).some(key => !['recallMsg', 'at', 'button', 'keyboard'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra?.recallMsg !== undefined && (!Number.isInteger(extra.recallMsg) || extra.recallMsg < 0 || extra.recallMsg > 120)) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra?.at !== undefined && typeof extra.at !== 'boolean' && typeof extra.at !== 'string') throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra?.button !== undefined && extra?.keyboard !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
 }
 
 export class PassiveReply {
-  constructor({ api, config, scope, target, senderId, messageId, createdAt, online = () => true, logger, now = Date.now, onError = () => {}, onCompatibility = () => {} }) {
-    Object.assign(this, { api, config, scope, target, senderId, messageId, createdAt, online, logger, now, onError, onCompatibility });
+  constructor({ api, config, registry, scope, target, senderId, messageId, eventId, referenceId, proactive = false, createdAt, online = () => true, logger, now = Date.now, onError = () => {}, onCompatibility = () => {} }) {
+    Object.assign(this, { api, config, registry, scope, target, senderId, messageId, eventId, referenceId, proactive, createdAt, online, logger, now, onError, onCompatibility });
+    this.limit = Math.min(config.maxReplies, proactive ? 5 : scope === 'c2c' ? 4 : 5);
+    this.windowSeconds = scope === 'c2c' ? config.c2cReplyWindowSeconds ?? config.replyWindowSeconds : config.replyWindowSeconds;
     this.sequence = 0;
     this.queue = Promise.resolve();
     this.feedbackSent = false;
@@ -100,15 +140,38 @@ export class PassiveReply {
   warn(code) { this.warnings.add(code); this.onCompatibility(code); }
   #check() {
     if (!this.online()) throw new AdapterError('OFFLINE');
-    if (!this.messageId) throw new AdapterError('PASSIVE_ONLY');
-    if (this.now() - this.createdAt > this.config.replyWindowSeconds * 1000) throw new AdapterError('REPLY_EXPIRED');
-    if (this.sequence >= this.config.maxReplies) throw new AdapterError('REPLY_LIMIT');
+    if (!this.messageId && !this.eventId && !this.proactive) throw new AdapterError('PASSIVE_ONLY');
+    if (!this.proactive && this.now() - this.createdAt > this.windowSeconds * 1000) throw new AdapterError('REPLY_EXPIRED');
+    if (this.sequence >= this.limit) throw new AdapterError('REPLY_LIMIT');
   }
-  async #post(body) {
+  async #post(body, recallSeconds = 0) {
     this.#check();
-    const result = await this.api.request('POST', this.api.route(this.scope, this.target, 'messages'), { ...body, msg_id: this.messageId, msg_seq: ++this.sequence });
+    if (body.keyboard && this.registry?.keyboardUnavailable) return this.#post(this.keyboardFallback(body), recallSeconds);
+    ++this.sequence;
+    let result;
+    try {
+      result = await this.api.request('POST', this.api.route(this.scope, this.target, 'messages'), { ...body, ...(!this.proactive ? { ...(this.messageId ? { msg_id: this.messageId } : { event_id: this.eventId }), msg_seq: this.sequence } : {}) });
+    } catch (error) {
+      // 304037 is an explicit no-button-permission rejection, never a delivery
+      // timeout. Reuse that rejected sequence for a readable, button-free reply.
+      if (body.keyboard && error instanceof AdapterError && error.code === 'PERMISSION_REQUIRED' && error.platformCode === 304037) {
+        --this.sequence;
+        if (this.registry) this.registry.keyboardUnavailable = true;
+        return this.#post(this.keyboardFallback(body), recallSeconds);
+      }
+      throw error;
+    }
     if (typeof result.id !== 'string' || !result.id) throw new AdapterError('API_RESPONSE');
-    return { message_id: result.id, seq: this.sequence, time: result.timestamp };
+    this.registry?.rememberMessage(this.scope, this.target, result.id, { own: true, ref_idx: result.ext_info?.ref_idx });
+    if (recallSeconds) this.registry.scheduleRecall(this.scope, this.target, result.id, recallSeconds);
+    return { message_id: result.id, seq: this.sequence, time: result.timestamp, ...(result.ext_info?.ref_idx ? { ref_idx: result.ext_info.ref_idx } : {}) };
+  }
+  keyboardFallback(body) {
+    this.warn('keyboard_unavailable_text_fallback');
+    const instructions = escapeMarkdown(keyboardText(body.keyboard));
+    const result = { ...body, markdown: { content: `${body.markdown?.content ?? ''}\n\n${instructions}` } };
+    delete result.keyboard; delete result.content;
+    return result;
   }
   #enqueue(callback) {
     const pending = this.queue.then(callback);
@@ -121,7 +184,7 @@ export class PassiveReply {
     logFailure(this.logger, 'reply', safe);
     // Only local validation errors get one passive explanation. Never resend on a
     // timeout/unknown delivery result or amplify a platform rejection.
-    if (feedback && !this.feedbackSent && /^(UNSUPPORTED_|IMAGE_|FORWARD_)/.test(safe.code)) {
+    if (feedback && !this.feedbackSent && /^(UNSUPPORTED_|IMAGE_|MEDIA_|FORWARD_|OPERATION_INVALID|MESSAGE_UNKNOWN)/.test(safe.code)) {
       this.feedbackSent = true;
       try { await this.#post({ msg_type: 0, content: `[QQBot] ${safe.message}` }); }
       catch (feedbackError) { logFailure(this.logger, 'feedback', feedbackError); }
@@ -129,22 +192,42 @@ export class PassiveReply {
     return false;
   }
   fail(error, feedback = true) { return this.#enqueue(() => this.#failure(error, feedback)); }
+  reference(quote) {
+    if (!quote) return undefined;
+    let id;
+    if (quote === true) id = this.referenceId;
+    else if (typeof quote.ref_idx === 'string') id = quote.ref_idx;
+    else {
+      const messageId = quote.message_id ?? quote.id;
+      const known = this.registry?.message(this.scope, this.target, messageId);
+      id = messageId === this.messageId ? this.referenceId : known?.recalled ? undefined : known?.ref_idx;
+    }
+    if (typeof id === 'string' && id && id.length <= 2048 && !/[\0\r\n]/.test(id)) return { message_id: id };
+    if (quote === true) { this.warn('quote_display_unavailable'); return undefined; }
+    throw new AdapterError('MESSAGE_UNKNOWN');
+  }
   send(message, quote = false, extra) {
+    extra ??= optionContext.getStore()?.reply === this ? optionContext.getStore().extra : undefined;
     return this.#enqueue(async () => {
       try {
         this.#check();
         validateOptions(quote, extra);
-        if (quote) this.warn('quote_display_unavailable');
-        const parts = await messageParts(message, this.config, { scope: this.scope, senderId: this.senderId, warn: code => this.warn(code) });
-        if (this.sequence + parts.length > this.config.maxReplies) throw new AdapterError('REPLY_LIMIT');
+        if (extra?.recallMsg && !this.registry) throw new AdapterError('UNSUPPORTED_OPTIONS');
+        const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, warn: code => this.warn(code), extra, quote };
+        const parts = await messageParts(message, this.config, context);
+        const reference = this.reference(context.quote);
+        if (this.sequence + parts.length > this.limit) throw new AdapterError('REPLY_LIMIT');
         const sent = [];
         for (const part of parts) {
-          if (part.image) {
+          let body;
+          if (part.media) {
             this.#check();
-            const upload = await this.api.request('POST', this.api.route(this.scope, this.target, 'files'), { file_type: 1, srv_send_msg: false, ...part.image });
+            const upload = await uploadMedia(this.api, this.scope, this.target, part.media, () => this.#check());
             if (typeof upload.file_info !== 'string' || !upload.file_info) throw new AdapterError('API_RESPONSE');
-            sent.push(await this.#post({ msg_type: 7, content: part.text || ' ', media: { file_info: upload.file_info } }));
-          } else sent.push(await this.#post({ msg_type: 0, content: part.text }));
+            body = { msg_type: 7, content: part.text || ' ', media: { file_info: upload.file_info } };
+          } else body = part.body ?? { msg_type: 0, content: part.text };
+          if (reference) body = { ...body, message_reference: reference };
+          sent.push(await this.#post(body, extra?.recallMsg));
         }
         return { ...sent.at(-1), message_ids: sent.map(item => item.message_id), ...(this.warnings.size ? { warnings: [...this.warnings] } : {}) };
       } catch (error) { return this.#failure(error); }
@@ -158,7 +241,11 @@ export function installReply(event, reply) {
   const guard = fn => (message, quote = false, extra) => {
     try { validateOptions(quote, extra); }
     catch (error) { return reply.fail(error); }
-    return fn(message, quote, extra);
+    const inherited = optionContext.getStore();
+    const effective = extra ?? (inherited?.reply === reply ? inherited.extra : undefined);
+    // The host wrapper drops the third argument and may schedule its own recall.
+    // Carry options through async-local context and let the adapter handle them once.
+    return optionContext.run({ reply, extra: effective }, () => fn(message, quote));
   };
   let current = guard((...args) => reply.send(...args));
   Object.defineProperty(event, 'reply', {

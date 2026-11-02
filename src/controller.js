@@ -28,11 +28,12 @@ export class AdapterController {
   async #start() {
     const { config, appSecret } = await this.store.read();
     if (!config.enabled) { this.status = { state: 'disabled' }; return; }
-    const registry = new AccountRegistry(this.host, config);
+    const registry = new AccountRegistry(this.host, config, { logger: this.logger });
     let api;
     try {
       registry.register();
       api = this.apiFactory({ config, appSecret });
+      registry.bindApi(api);
       // Preserve replay protection over configuration reloads for the same AppID.
       if (!this.dedup.has(config.appId)) this.dedup.set(config.appId, new EventDeduplicator());
       if (this.dedup.size > 10) this.dedup.delete(this.dedup.keys().next().value);
