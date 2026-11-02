@@ -58,7 +58,7 @@ export class EventMapper {
       message_id: d.id, time: Math.floor(timestamp / 1000), raw_message: content,
       sender, message: [], adapter: 'QQBot',
       isGroup: scope === 'group', isPrivate: scope === 'c2c', atBot: scope === 'group',
-      qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, unsupportedAttachments: [], lastError: null },
+      qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, unsupportedAttachments: [], compatibility: [], lastError: null },
       getAvatarUrl: unsupported
     };
     if (scope === 'group') event.message.push({ type: 'at', qq: this.registry.id, text: 'QQ 官方机器人' });
@@ -73,7 +73,7 @@ export class EventMapper {
       } else event.qqbot.unsupportedAttachments.push('unsupported');
     }
     fixMaster(event, isMaster(this.config, scope, openid));
-    const reply = new PassiveReply({ api: this.api, config: this.config, scope, target, messageId: d.id, createdAt, online: () => this.registry.online, logger: this.logger, now: this.now, onError: error => { event.qqbot.lastError = error; } });
+    const reply = new PassiveReply({ api: this.api, config: this.config, scope, target, senderId: userId, messageId: d.id, createdAt, online: () => this.registry.online, logger: this.logger, now: this.now, onError: error => { event.qqbot.lastError = error; }, onCompatibility: code => { if (!event.qqbot.compatibility.includes(code)) event.qqbot.compatibility.push(code); } });
     installReply(event, reply);
     const rejectUnsupported = () => {
       const error = new AdapterError('UNSUPPORTED_API');
@@ -88,9 +88,14 @@ export class EventMapper {
       group.pickMember = id => { if (id !== userId) return unsupported(); return member; };
       event.group = group;
       event.member = member;
+      group.recallMsg = () => reply.fail(new AdapterError('UNSUPPORTED_API'), false);
       this.registry.observe(this.registry.account.gl, groupId, group.info);
     } else {
       event.friend = contact(userInfo, (...args) => reply.send(...args), rejectUnsupported);
+      // Legacy QR helpers call recall from an unawaited timer. Report false and
+      // diagnostics without throwing from that timer, claiming a deletion, or
+      // consuming another reply slot from a login flow's limited passive quota.
+      event.friend.recallMsg = () => reply.fail(new AdapterError('UNSUPPORTED_API'), false);
       this.registry.observe(this.registry.account.fl, userId, userInfo);
     }
     if (!content && !event.message.some(part => part.type === 'image') && event.qqbot.unsupportedAttachments.length) {

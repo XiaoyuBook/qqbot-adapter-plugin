@@ -20,7 +20,7 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.1.0' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.1.1' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),

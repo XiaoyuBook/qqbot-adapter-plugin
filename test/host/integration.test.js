@@ -24,7 +24,7 @@ test('real Miao loader + listener + Runtime + ICQQ bus process group and C2C onc
   }
   assert.equal(events.length, 2); assert.equal(childCalls, 0); assert.equal(f.userIds.length, 2);
   for (const e of events) { assert.ok(e.runtime instanceof f.runtimeClass); assert.equal(e.bot, f.registry.account); assert.equal(e.msg, '#测试'); assert.equal(e.qqbot.lastError, null); }
-  assert.equal(events[0].atBot, true); assert.equal(f.api.calls.length, 6);
+  assert.equal(events[0].atBot, true); assert.equal(f.api.calls.length, 4);
   assert.equal(f.userIds[0], events[0].user_id); assert.equal(f.bot.uin, 88888);
 });
 test('real Miao permission filter accepts local OpenID grant, denies self-claim and masterQQ injection', async t => {
@@ -42,13 +42,13 @@ test('real Miao blacklist / whitelist and group-only-at filters work with namesp
   await f.mapper.dispatch(payload('c2c')); await f.flush(); assert.equal(events.length, 1);
   await f.mapper.dispatch(payload('group', { id: 'other' })); await f.flush(); assert.equal(events.length, 1);
 });
-test('real Miao reply wrapper cannot discard unsupported quote, button, at or recall options', async t => {
+test('real Miao wrapper keeps boolean quote compatibility and rejects button/at/recall options', async t => {
   const f = await harness(t); const results = [];
   await probe(f, { execute: async e => {
     results.push(await e.reply('no', false, { button: [] })); results.push(await e.reply('no', false, { at: true })); results.push(await e.reply('no', false, { recallMsg: 10 })); results.push(await e.reply('no', true)); results.push(await e.reply('ok'));
   } });
   const e = await f.mapper.dispatch(payload()); await f.flush();
-  assert.deepEqual(results.slice(0, 4), [false, false, false, false]); assert.ok(results[4].message_id); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS'); assert.equal(f.api.calls.length, 2);
+  assert.deepEqual(results.slice(0, 3), [false, false, false]); assert.ok(results[3].message_id); assert.ok(results[4].message_id); assert.equal(e.qqbot.lastError.code, 'UNSUPPORTED_OPTIONS'); assert.equal(f.api.calls.length, 3);
 });
 test('real NapCat BotInit before/after QQBot retains default account and event routing through ICQQ', async t => {
   for (const order of ['before', 'after']) {

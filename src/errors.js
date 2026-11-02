@@ -14,7 +14,7 @@ const messages = Object.freeze({
   REPLY_EXPIRED: '被动回复窗口已过期，请重新发送消息触发。',
   REPLY_LIMIT: '本条触发消息的回复次数已用尽，请重新触发。',
   UNSUPPORTED_MESSAGE: '当前仅支持文本和图片，暂不支持语音、视频、文件、转发、按钮、Markdown 卡片或 @。',
-  UNSUPPORTED_OPTIONS: '当前不支持引用展示、撤回、按钮或额外回复选项；请使用普通文本/图片回复。',
+  UNSUPPORTED_OPTIONS: '当前不支持引用对象、撤回、按钮或额外回复选项；请使用普通文本/图片回复。布尔 quote 参数仅关联被动回复，不展示引用。',
   UNSUPPORTED_API: 'QQ 官方平台或本适配器未实现此能力（群管、成员查询、头像、历史、撤回或主动发送）。',
   IMAGE_INVALID: '图片来源无效；支持 HTTPS URL、Buffer、base64:// 或本地普通图片文件。',
   IMAGE_TOO_LARGE: '图片超过适配器的单张大小限制，请缩小后重试。',

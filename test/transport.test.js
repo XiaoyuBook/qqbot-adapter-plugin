@@ -9,17 +9,26 @@ async function setup(patch = {}) {
   transport.start(); await settle();
   return { timers, api, sockets, states, dispatches, logger, transport };
 }
-function ready(ws, sequence = 0) { ws.frame({ op: 10, d: { heartbeat_interval: 1000 } }); ws.frame({ op: 11 }); ws.frame({ op: 0, t: 'READY', s: sequence, d: { session_id: 'session', user: { id: 'bot-platform-id' } } }); }
+function ready(ws, sequence = 0) { ws.frame({ op: 10, d: { heartbeat_interval: 1000 } }); ws.frame({ op: 0, t: 'READY', s: sequence, d: { session_id: 'session', user: { id: 'bot-platform-id' } } }); }
 
-test('identify only GROUP_AND_C2C intent, first heartbeat null then seq=0, READY', async t => {
+test('authenticate before first periodic heartbeat, including READY sequence 0', async t => {
   const f = await setup(); t.after(() => f.transport.stop()); ready(f.sockets[0]);
   assert.equal(f.transport.state, 'online');
   assert.deepEqual(f.sockets[0].sent[0].d.intents, 1 << 25); assert.equal(f.sockets[0].sent[0].d.token, 'QQBot fake-token');
-  assert.equal(f.sockets[0].sent[1].d, null); await f.timers.tick(1000); assert.equal(f.sockets[0].sent.at(-1).d, 0);
+  assert.equal(f.sockets[0].sent.length, 1); await f.timers.tick(1000); assert.deepEqual(f.sockets[0].sent.at(-1), { op: 1, d: 0 });
+});
+test('gateway that ignores pre-READY heartbeat remains connected over repeated ACK cycles', async t => {
+  const f = await setup(); t.after(() => f.transport.stop());
+  const ws = f.sockets[0]; ws.frame({ op: 10, d: { heartbeat_interval: 1000 } });
+  await f.timers.tick(1000); assert.equal(ws.sent.length, 1); assert.equal(f.transport.pendingAck, false);
+  ws.frame({ op: 0, t: 'READY', s: 1, d: { session_id: 'session' } });
+  for (let i = 0; i < 5; i++) { await f.timers.tick(1000); ws.frame({ op: 11 }); }
+  assert.equal(f.sockets.length, 1); assert.equal(f.transport.state, 'online'); assert.equal(f.transport.ackCount, 5);
 });
 test('ACK watchdog retires silent link and resumes with sequence including 0', async t => {
   const f = await setup(); t.after(() => f.transport.stop()); ready(f.sockets[0]);
   await f.timers.tick(2000); assert.equal(f.transport.state, 'reconnecting'); assert.equal(f.sockets[0].terminated, true);
+  assert.equal(f.states.at(-1).reason, 'heartbeat_timeout');
   await f.timers.tick(1000); assert.equal(f.sockets.length, 2);
   f.sockets[1].frame({ op: 10, d: { heartbeat_interval: 1000 } });
   assert.deepEqual(f.sockets[1].sent[0], { op: 6, d: { token: 'QQBot fake-token', session_id: 'session', seq: 0 } });

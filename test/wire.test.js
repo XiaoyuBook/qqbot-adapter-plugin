@@ -58,11 +58,11 @@ test('real HTTP + ws wire: authentication, READY, text/image passive reply, reco
   });
   t.after(async () => { transport.stop(); api.close(); registry.dispose(); for (const socket of clients) socket.terminate(); await new Promise(resolve => wss.close(resolve)); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   transport.start();
-  await until(() => posts.length === 3); await Promise.all(replies);
-  assert.equal(events, 1); assert.equal(posts[0].body.msg_id, event.d.id); assert.equal(posts[2].body.msg_seq, 2); assert.equal(posts[1].body.srv_send_msg, false);
+  await until(() => posts.length === 2); await Promise.all(replies);
+  assert.equal(events, 1); assert.equal(posts[1].body.msg_id, event.d.id); assert.equal(posts[1].body.msg_seq, 1); assert.equal(posts[0].body.srv_send_msg, false); assert.equal(posts[1].body.content, 'wire text');
   clients[0].close(4009); await until(() => identifies.length === 2 && transport.state === 'online');
   assert.equal(identifies[1].op, 6); assert.equal(identifies[1].d.session_id, 'WIRE_SESSION');
-  clients[1].send(JSON.stringify(payload('c2c'))); await until(() => posts.length === 6); await Promise.all(replies);
+  clients[1].send(JSON.stringify(payload('c2c'))); await until(() => posts.length === 4); await Promise.all(replies);
   assert.equal(events, 2); assert.equal(posts[3].url, '/v2/users/c2c-openid/messages');
   assert.equal(logger.records.join().includes('FAKE_WIRE_SECRET'), false); assert.equal(logger.records.join().includes('FAKE_WIRE_TOKEN'), false);
 });

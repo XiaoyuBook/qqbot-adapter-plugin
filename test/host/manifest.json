@@ -12,6 +12,18 @@
       "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3"
     }
   },
+  "xiaoyao": {
+    "repository": "Ctrlcvs/xiaoyao-cvs-plugin",
+    "ref": "e7ab3e8b276a11680beb47d0c5517f6e0a4c2022",
+    "hostPath": "plugins/xiaoyao-cvs-plugin",
+    "files": {
+      "apps/mhyTopUpLogin.js": "156e88e8c1ac86b1ebbc04664c584d94f23679ecef9eb345f37c014a3a2cad99",
+      "model/mhyTopUpLogin.js": "fe87c3525b2647a95d0bc865851d371cbabce6c877fa2aa5ee8e2b509075775a",
+      "components/Common.js": "8bc2e18c2a08d7bd089bfa2d9355bef702dbe2a79be8271ab279d16f966b4cda",
+      "model/mys/utils.js": "8dd7d184d5373c44d36a603db208bac0adda94f3fe317f86d14f6dc55a35c9cd",
+      "model/mys/mihoyoApi.js": "27953c219d709fbdb24d2afa7dbd511987b00a17b10b93cfb5e92e4d12fb7ad7"
+    }
+  },
   "napcat": {
     "repository": "qiannqq/napcat-adapter",
     "ref": "4310237a7ff1bafd6531e09400ebc7e11225343f",

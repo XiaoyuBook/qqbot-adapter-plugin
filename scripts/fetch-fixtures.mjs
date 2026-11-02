@@ -13,7 +13,7 @@ for (const [name, source] of Object.entries(manifest)) {
     const filename = path.join(root, '.verification-cache/fixtures', name, file);
     let content = await fs.readFile(filename).catch(() => null);
     if (!content || createHash('sha256').update(content).digest('hex') !== expected) {
-      if (local) content = await fs.readFile(path.join(local, name === 'miao' ? '' : 'plugins/napcat-adapter', file));
+      if (local) content = await fs.readFile(path.join(local, name === 'miao' ? '' : source.hostPath || 'plugins/napcat-adapter', file));
       else {
         let response;
         try { response = await fetch(`https://raw.githubusercontent.com/${source.repository}/${source.ref}/${file}`, { signal: AbortSignal.timeout(20000), redirect: 'error' }); }

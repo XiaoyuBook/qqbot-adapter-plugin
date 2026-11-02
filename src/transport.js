@@ -25,6 +25,7 @@ export class GatewayTransport {
     this.attempt = 0;
     this.readyAt = null;
     this.pendingAck = false;
+    this.ackCount = 0;
     this.handles = new Map();
   }
 
@@ -37,9 +38,9 @@ export class GatewayTransport {
     if (this.handles.has(name)) this.timers.clearTimeout(this.handles.get(name));
     this.handles.delete(name);
   }
-  #status(state, code) {
+  #status(state, code, reason) {
     this.state = state;
-    try { this.onStatus({ state, ...(Number.isInteger(code) ? { closeCode: code } : {}) }); }
+    try { this.onStatus({ state, ...(Number.isInteger(code) ? { closeCode: code } : {}), ...(reason ? { reason } : {}) }); }
     catch (error) { logFailure(this.logger, 'status_callback', error); }
   }
   #retire() {
@@ -66,15 +67,15 @@ export class GatewayTransport {
     this.#status('stopped');
   }
 
-  #retry({ code, reset = false, fatal = false, delay = 0 } = {}) {
+  #retry({ code, reset = false, fatal = false, delay = 0, reason = 'connection_lost' } = {}) {
     if (!this.running) return;
     if (this.readyAt !== null && this.now() - this.readyAt >= 30000) this.attempt = 0;
     this.readyAt = null;
     this.generation++;
     this.#retire();
     if (reset) this.#resetSession();
-    if (fatal) { this.running = false; this.#status('blocked', code); return; }
-    this.#status('reconnecting', code);
+    if (fatal) { this.running = false; this.#status('blocked', code, reason); return; }
+    this.#status('reconnecting', code, reason);
     const base = Math.min(this.config.reconnectMaxMs, this.config.reconnectMinMs * 2 ** Math.min(this.attempt++, 20));
     const backoff = Math.max(delay, Math.min(this.config.reconnectMaxMs, Math.round(base * (0.75 + this.random() * 0.5))));
     this.#timer('retry', backoff, () => void this.#connect());
@@ -93,7 +94,8 @@ export class GatewayTransport {
       this.socket = ws;
       const current = () => this.running && generation === this.generation && this.socket === ws;
       let hello = false;
-      this.#timer('handshake', this.config.requestTimeoutMs, () => { if (current()) this.#retry(); });
+      this.ackCount = 0;
+      this.#timer('handshake', this.config.requestTimeoutMs, () => { if (current()) this.#retry({ reason: 'hello_timeout' }); });
       ws.on('message', raw => {
         if (!current()) return;
         try {
@@ -106,23 +108,31 @@ export class GatewayTransport {
               if (hello || !Number.isFinite(interval) || interval < 100 || interval > 300000) throw new AdapterError('GATEWAY_INVALID');
               hello = true;
               this.#clear('handshake');
-              this.#timer('identify', this.config.requestTimeoutMs, () => { if (current()) this.#retry(); });
+              this.#timer('identify', this.config.requestTimeoutMs, () => { if (current()) this.#retry({ reason: 'ready_timeout' }); });
               if (this.sessionId && this.sequence !== null) this.#send({ op: 6, d: { token: `QQBot ${token}`, session_id: this.sessionId, seq: this.sequence } });
               else this.#send({ op: 2, d: { token: `QQBot ${token}`, intents: 1 << 25, shard: [0, 1], properties: { $os: process.platform, $browser: 'qqbot-adapter-plugin', $device: 'qqbot-adapter-plugin' } } });
               const beat = () => {
                 if (!current()) return;
-                if (this.pendingAck) { this.#retry(); return; }
+                if (this.pendingAck) { this.#retry({ reason: 'heartbeat_timeout' }); return; }
+                if (this.state !== 'online') { this.#timer('heartbeat', interval, beat); return; }
                 this.#heartbeat();
                 this.#timer('heartbeat', interval, beat);
               };
-              this.#heartbeat();
+              // Match the official lifecycle: authenticate first, then send at
+              // the negotiated cadence. A pre-READY heartbeat can be ignored by
+              // the gateway and must not arm an ACK timeout for the first tick.
               this.#timer('heartbeat', interval, beat);
               break;
             }
-            case 11: this.pendingAck = false; break;
-            case 1: this.#heartbeat(); break;
-            case 7: this.#retry(); break;
-            case 9: this.#retry({ reset: payload.d !== true, delay: 3000 }); break;
+            case 11:
+              if (this.pendingAck) {
+                this.pendingAck = false;
+                if (++this.ackCount === 1) this.logger?.info?.('[qqbot-adapter-plugin] heartbeat_ack');
+              }
+              break;
+            case 1: if (this.state === 'online') this.#heartbeat(); break;
+            case 7: this.#retry({ reason: 'server_reconnect' }); break;
+            case 9: this.#retry({ reset: payload.d !== true, delay: 3000, reason: 'invalid_session' }); break;
             case 0: {
               if (!hello) throw new AdapterError('GATEWAY_INVALID');
               if (payload.t === 'READY') {
@@ -144,19 +154,19 @@ export class GatewayTransport {
           }
         } catch (error) {
           logFailure(this.logger, 'gateway_frame', error);
-          this.#retry({ reset: true });
+          this.#retry({ reset: true, reason: 'invalid_frame' });
         }
       });
       ws.on('close', code => {
         if (!current()) return;
         if (code === 4004) this.api.invalidateToken();
-        this.#retry({ code, fatal: fatalCodes.has(code), reset: [4004, 4006, 4007].includes(code) || (code >= 4900 && code <= 4913), delay: [4004, 4008].includes(code) ? 60000 : 0 });
+        this.#retry({ code, reason: 'socket_closed', fatal: fatalCodes.has(code), reset: [4004, 4006, 4007].includes(code) || (code >= 4900 && code <= 4913), delay: [4004, 4008].includes(code) ? 60000 : 0 });
       });
-      ws.on('error', () => { if (current()) this.#retry(); });
+      ws.on('error', () => { if (current()) this.#retry({ reason: 'socket_error' }); });
     } catch (error) {
       if (!this.running || generation !== this.generation) return;
       logFailure(this.logger, 'connect', error);
-      this.#retry({ fatal: ['GATEWAY_INVALID'].includes(error.code) || [401, 403].includes(error.status), delay: error.retryAfterMs || 0 });
+      this.#retry({ reason: 'connect_failed', fatal: ['GATEWAY_INVALID'].includes(error.code) || [401, 403].includes(error.status), delay: error.retryAfterMs || 0 });
     }
   }
 
@@ -165,7 +175,8 @@ export class GatewayTransport {
     this.socket.send(JSON.stringify(payload));
   }
   #heartbeat() {
-    this.#send({ op: 1, d: this.sequence });
     this.pendingAck = true;
+    try { this.#send({ op: 1, d: this.sequence }); }
+    catch (error) { this.pendingAck = false; throw error; }
   }
 }

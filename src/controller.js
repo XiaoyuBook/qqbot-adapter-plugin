@@ -43,7 +43,7 @@ export class AdapterController {
         onStatus: status => {
           registry.setOnline(status.state === 'online');
           this.status = status;
-          this.logger?.info?.(`[qqbot-adapter-plugin] ${status.state}${status.closeCode ? ` close=${status.closeCode}` : ''}`);
+          this.logger?.info?.(`[qqbot-adapter-plugin] ${status.state}${status.closeCode ? ` close=${status.closeCode}` : ''}${status.reason ? ` reason=${status.reason}` : ''}`);
         }
       });
       this.active = { registry, api, mapper, transport };

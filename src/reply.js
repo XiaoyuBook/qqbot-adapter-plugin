@@ -37,14 +37,17 @@ export async function imageSource(value, maxBytes) {
   return { file_data: data.toString('base64') };
 }
 
-async function messageParts(message, config) {
+async function messageParts(message, config, context) {
   const input = Array.isArray(message) ? message : [message];
   const parts = [];
   for (const item of input) {
     let text;
     if (typeof item === 'string') text = item;
     else if (item?.type === 'text' && typeof item.text === 'string') text = item.text;
-    else if (Buffer.isBuffer(item) || item instanceof Uint8Array || item?.type === 'image') {
+    else if (item?.type === 'at' && context.scope === 'c2c' && context.senderId && String(item.id ?? item.qq) === context.senderId) {
+      context.warn('private_self_mention_omitted');
+      continue;
+    } else if (Buffer.isBuffer(item) || item instanceof Uint8Array || item?.type === 'image') {
       parts.push({ image: await imageSource(item?.type === 'image' ? (item.file ?? item.url) : item, config.maxImageBytes) });
       continue;
     } else throw new AdapterError('UNSUPPORTED_MESSAGE');
@@ -62,20 +65,30 @@ async function messageParts(message, config) {
     }
   }
   if (!output.length) throw new AdapterError('UNSUPPORTED_MESSAGE');
-  return output;
+  // A caption and the following image are one QQ media message. This also
+  // avoids consuming two of the platform's five passive replies for one QR.
+  const combined = [];
+  for (const part of output) {
+    if (part.image && combined.at(-1)?.text !== undefined && !combined.at(-1)?.image) combined.push({ ...part, text: combined.pop().text });
+    else combined.push(part);
+  }
+  return combined;
 }
 
 function validateOptions(quote, extra) {
-  if (quote || (extra !== undefined && (extra === null || typeof extra !== 'object' || Object.keys(extra).length))) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (quote !== undefined && quote !== null && typeof quote !== 'boolean') throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.entries(extra).some(([key, value]) => key !== 'recallMsg' || value !== 0))) throw new AdapterError('UNSUPPORTED_OPTIONS');
 }
 
 export class PassiveReply {
-  constructor({ api, config, scope, target, messageId, createdAt, online = () => true, logger, now = Date.now, onError = () => {} }) {
-    Object.assign(this, { api, config, scope, target, messageId, createdAt, online, logger, now, onError });
+  constructor({ api, config, scope, target, senderId, messageId, createdAt, online = () => true, logger, now = Date.now, onError = () => {}, onCompatibility = () => {} }) {
+    Object.assign(this, { api, config, scope, target, senderId, messageId, createdAt, online, logger, now, onError, onCompatibility });
     this.sequence = 0;
     this.queue = Promise.resolve();
     this.feedbackSent = false;
+    this.warnings = new Set();
   }
+  warn(code) { this.warnings.add(code); this.onCompatibility(code); }
   #check() {
     if (!this.online()) throw new AdapterError('OFFLINE');
     if (!this.messageId) throw new AdapterError('PASSIVE_ONLY');
@@ -93,26 +106,27 @@ export class PassiveReply {
     this.queue = pending.catch(() => {});
     return pending;
   }
-  async #failure(error) {
+  async #failure(error, feedback = true) {
     const safe = safeError(error);
     this.onError({ code: safe.code, message: safe.message, ...(safe.status ? { status: safe.status } : {}), ...(safe.platformCode ? { platformCode: safe.platformCode } : {}) });
     logFailure(this.logger, 'reply', safe);
     // Only local validation errors get one passive explanation. Never resend on a
     // timeout/unknown delivery result or amplify a platform rejection.
-    if (!this.feedbackSent && /^(UNSUPPORTED_|IMAGE_)/.test(safe.code)) {
+    if (feedback && !this.feedbackSent && /^(UNSUPPORTED_|IMAGE_)/.test(safe.code)) {
       this.feedbackSent = true;
       try { await this.#post({ msg_type: 0, content: `[QQBot] ${safe.message}` }); }
       catch (feedbackError) { logFailure(this.logger, 'feedback', feedbackError); }
     }
     return false;
   }
-  fail(error) { return this.#enqueue(() => this.#failure(error)); }
+  fail(error, feedback = true) { return this.#enqueue(() => this.#failure(error, feedback)); }
   send(message, quote = false, extra) {
     return this.#enqueue(async () => {
       try {
         this.#check();
         validateOptions(quote, extra);
-        const parts = await messageParts(message, this.config);
+        if (quote) this.warn('quote_display_unavailable');
+        const parts = await messageParts(message, this.config, { scope: this.scope, senderId: this.senderId, warn: code => this.warn(code) });
         if (this.sequence + parts.length > this.config.maxReplies) throw new AdapterError('REPLY_LIMIT');
         const sent = [];
         for (const part of parts) {
@@ -120,10 +134,10 @@ export class PassiveReply {
             this.#check();
             const upload = await this.api.request('POST', this.api.route(this.scope, this.target, 'files'), { file_type: 1, srv_send_msg: false, ...part.image });
             if (typeof upload.file_info !== 'string' || !upload.file_info) throw new AdapterError('API_RESPONSE');
-            sent.push(await this.#post({ msg_type: 7, content: ' ', media: { file_info: upload.file_info } }));
+            sent.push(await this.#post({ msg_type: 7, content: part.text || ' ', media: { file_info: upload.file_info } }));
           } else sent.push(await this.#post({ msg_type: 0, content: part.text }));
         }
-        return { ...sent.at(-1), message_ids: sent.map(item => item.message_id) };
+        return { ...sent.at(-1), message_ids: sent.map(item => item.message_id), ...(this.warnings.size ? { warnings: [...this.warnings] } : {}) };
       } catch (error) { return this.#failure(error); }
     });
   }
