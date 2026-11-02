@@ -4,6 +4,7 @@ import nodeFs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import util from 'node:util';
+import { pipeline } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import lodash from 'lodash';
@@ -45,7 +46,9 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
     return modules.get(id);
   }
   const dependencies = {
-    'node:util': { default: util }, 'node:fs/promises': { default: fs }, 'node:fs': { default: nodeFs }, 'node:path': { default: path },
+    'node:util': { default: util }, util: { promisify: util.promisify }, stream: { pipeline },
+    'node-fetch': { default: async () => { throw new Error('No real fetch allowed in the host harness'); } },
+    'node:fs/promises': { default: fs }, 'node:fs': { default: nodeFs }, 'node:path': { default: path },
     lodash: { default: lodash }, moment: { default: moment }, icqq: { segment, Client },
     'node-schedule': { default: { scheduleJob() { throw new Error('No schedules allowed in host harness'); } } },
     chokidar: { default: { watch() { throw new Error('No filesystem watchers allowed in host harness'); } } },
@@ -101,5 +104,5 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
     nc.sendMsg = async () => ({ message_id: 'napcat-sent' });
     await nc.BotInit(); return nc;
   }
-  return { bot, logger, cfg, groupCfg, other, loader, Plugin, runtimeClass, userIds, registry, api, mapper, flush, napcat };
+  return { bot, logger, cfg, groupCfg, other, loader, Plugin, runtimeClass, userIds, registry, api, mapper, flush, napcat, hostModule: get };
 }

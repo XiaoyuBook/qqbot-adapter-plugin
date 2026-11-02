@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { AdapterError, logFailure, safeError } from './errors.js';
+import { isForwardMessage, forwardContent } from './forward.js';
 
 function imageUrl(value) {
   try {
@@ -38,7 +39,13 @@ export async function imageSource(value, maxBytes) {
 }
 
 async function messageParts(message, config, context) {
-  const input = Array.isArray(message) ? message : [message];
+  let input = Array.isArray(message) ? message : [message];
+  input = input.flatMap(item => {
+    if (!isForwardMessage(item)) return [item];
+    const forward = forwardContent(item);
+    forward.warnings.forEach(context.warn);
+    return forward.items;
+  });
   const parts = [];
   for (const item of input) {
     let text;
@@ -114,7 +121,7 @@ export class PassiveReply {
     logFailure(this.logger, 'reply', safe);
     // Only local validation errors get one passive explanation. Never resend on a
     // timeout/unknown delivery result or amplify a platform rejection.
-    if (feedback && !this.feedbackSent && /^(UNSUPPORTED_|IMAGE_)/.test(safe.code)) {
+    if (feedback && !this.feedbackSent && /^(UNSUPPORTED_|IMAGE_|FORWARD_)/.test(safe.code)) {
       this.feedbackSent = true;
       try { await this.#post({ msg_type: 0, content: `[QQBot] ${safe.message}` }); }
       catch (feedbackError) { logFailure(this.logger, 'feedback', feedbackError); }

@@ -10,7 +10,9 @@
       "lib/listener/listener.js": "021fd4b3e00ed77a703a8e32cfacb719a002c9355980c838299d610da922c71b",
       "lib/listener/loader.js": "16882489974d9088070e911440218b6fb9df5931ac1977f1416b417428edcf90",
       "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3",
-      "lib/puppeteer/puppeteer.js": "c489acb44799fb56c64b8c87e8bb9bdce4264df5591a3999ebd6c1f82294e6c2"
+      "lib/puppeteer/puppeteer.js": "c489acb44799fb56c64b8c87e8bb9bdce4264df5591a3999ebd6c1f82294e6c2",
+      "lib/common/common.js": "1f8b0d897fdbc3290921b8efe6a8e6e8724f320c530efcc59e8f381357c673a1",
+      "plugins/genshin/model/user.js": "d665990f20525443012350bdee9ef128f6a76a662486d435c7f5c729f51e484b"
     }
   },
   "xiaoyao": {
