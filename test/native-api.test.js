@@ -14,7 +14,9 @@ test('current official routes support empty 200/204 deletions, management and in
   await api.request('DELETE', '/v2/users/user/messages/ROBOT1.0_c2c');
   await api.request('PUT', '/interactions/test-interaction', { code: 0 });
   await api.request('POST', '/v2/groups/group/restrict_chat_setting', { members: [] });
-  assert.equal(calls.length, 4); assert.ok(calls.every(call => call.url.startsWith('https://api.bot.qq.com/')));
+  await api.request('DELETE', '/v2/media-images/102083127_test/delete');
+  assert.equal(calls.length, 5); assert.ok(calls.every(call => call.url.startsWith('https://api.bot.qq.com/')));
+  assert.equal(calls[4].url, 'https://api.bot.qq.com/v2/media-images/102083127_test/delete');
   assert.ok(calls.every(call => call.init.headers.Authorization === 'QQBot FAKE_TOKEN'));
   api.close();
 });
@@ -24,13 +26,14 @@ test('route guard enforces method, path, query keys and traversal bounds before 
     ['GET', '/v2/groups/g/members?cursor=a%2Fb%3F%3D'], ['POST', '/v2/groups/g/upload_prepare'],
     ['POST', '/v2/users/u/upload_part_finish'], ['GET', '/v2/groups/g/members/m'],
     ['POST', '/v2/groups/g/approval_join_request/m'], ['POST', '/v2/media-images/prepare'],
-    ['GET', '/v2/media-images?cursor=next']
+    ['GET', '/v2/media-images?cursor=next'], ['DELETE', '/v2/media-images/102083127_test/delete']
   ]) assert.equal(apiRouteAllowed(method, route), true, route);
   for (const [method, route] of [
     ['POST', '/gateway'], ['GET', '/v2/groups/g/messages'], ['DELETE', '/v2/groups/g/messages/..'],
     ['DELETE', '/v2/groups/g/messages/%2e%2e'], ['DELETE', '/v2/groups/g/messages/%0a'],
     ['GET', '/v2/groups/g/members?secret=FAKE'], ['GET', '/v2/groups/g/members?cursor=x?y'],
-    ['POST', '/v2/groups/g/files?cursor=x'], ['PUT', '//evil.example/'], ['POST', '/v2/groups/g/unknown']
+    ['POST', '/v2/groups/g/files?cursor=x'], ['PUT', '//evil.example/'], ['POST', '/v2/groups/g/unknown'],
+    ['DELETE', '/v2/media-images/102083127_test']
   ]) assert.equal(apiRouteAllowed(method, route), false, route);
 });
 

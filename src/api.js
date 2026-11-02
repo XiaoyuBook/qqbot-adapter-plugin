@@ -19,7 +19,7 @@ export function apiRouteAllowed(method, route) {
   const opaque = '(?:[A-Za-z0-9_.:@=+-]|%[A-Fa-f0-9]{2}){1,3072}';
   if (method === 'POST' && /^\/v2\/media-images\/(prepare|complete)$/.test(pathname)) return true;
   if (method === 'GET' && pathname === '/v2/media-images') return true;
-  if (method === 'DELETE' && new RegExp(`^/v2/media-images/${opaque}$`).test(pathname)) return true;
+  if (method === 'DELETE' && new RegExp(`^/v2/media-images/${opaque}/delete$`).test(pathname)) return true;
   if (method === 'POST' && new RegExp(`^/v2/(groups|users)/${id}/(messages|files|upload_prepare|upload_part_finish)$`).test(pathname)) return true;
   if (method === 'DELETE' && new RegExp(`^/v2/(groups|users)/${id}/messages/${opaque}$`).test(pathname)) return true;
   if (method === 'PUT' && new RegExp(`^/interactions/${opaque}$`).test(pathname)) return true;

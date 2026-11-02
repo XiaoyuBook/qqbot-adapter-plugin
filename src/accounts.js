@@ -46,7 +46,7 @@ export class AccountRegistry {
       makeForwardMsg, segment: richSegment,
       uploadMarkdownImage: async (file, name) => { this.checkOnline(); return uploadMarkdownImage(this.api, await prepareMedia('image', file, { ...this.config, maxImageBytes: Math.min(this.config.maxImageBytes, 10 * 1024 * 1024) }, name)); },
       getMarkdownImages: async (cursor = '') => { this.checkOnline(); boundedString(cursor, 2048, true); return this.api.request('GET', `/v2/media-images${cursor ? `?${new URLSearchParams({ cursor })}` : ''}`); },
-      deleteMarkdownImage: async id => { this.checkOnline(); boundedString(id, 256); await this.api.request('DELETE', `/v2/media-images/${encodeURIComponent(id)}`); return true; },
+      deleteMarkdownImage: async id => { this.checkOnline(); boundedString(id, 256); await this.api.request('DELETE', `/v2/media-images/${encodeURIComponent(id)}/delete`); return true; },
       deleteMsg: id => this.deleteMsg(id), getMsg: unsupported,
       getGroupInfo: id => this.group(this.openid(id, 'group')).getInfo(),
       getGroupMemberInfo: (groupId, userId) => this.group(this.openid(groupId, 'group')).getMemberInfo(userId)
