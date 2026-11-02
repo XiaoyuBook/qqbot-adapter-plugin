@@ -1,0 +1,20 @@
+{
+  "miao": {
+    "repository": "yoimiya-kokomi/Miao-Yunzai",
+    "ref": "354b806102f43cb5a216e8e2418b57278246fdb2",
+    "files": {
+      "lib/plugins/loader.js": "d9276f51455b95a76bb5b10a3165bc2906e4b93f63cf27b8fe07176cc3a17b4b",
+      "lib/plugins/runtime.js": "bb89cd2a0d97ce3e21092c12b5837d86d4c76d13f68054fcbf1a9a956810f36f",
+      "lib/plugins/plugin.js": "ec6ae5cb1c1fcf6ad8592a13d18bd55f40bc774674786152acd8c7d3e9b84768",
+      "lib/events/message.js": "47658a4f597bb90911b514e16a14d95434d2f3d8abac12119b80271012cebe82",
+      "lib/listener/listener.js": "021fd4b3e00ed77a703a8e32cfacb719a002c9355980c838299d610da922c71b",
+      "lib/listener/loader.js": "16882489974d9088070e911440218b6fb9df5931ac1977f1416b417428edcf90",
+      "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3"
+    }
+  },
+  "napcat": {
+    "repository": "qiannqq/napcat-adapter",
+    "ref": "4310237a7ff1bafd6531e09400ebc7e11225343f",
+    "files": { "adapter/index.js": "7b8d0bb89e36c27e9826d389754a2025c02f49e811f99d93bd780419bee2536c" }
+  }
+}

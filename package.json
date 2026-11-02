@@ -1,0 +1,20 @@
+{
+  "name": "qqbot-adapter-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Miao-Yunzai 3.1.3 QQ 官方机器人独立适配器",
+  "license": "UNLICENSED",
+  "files": ["index.js", "guoba.support.js", "src/", "config/default.json", "scripts/configure.mjs", "README.md", "THIRD_PARTY.md", "docs/"],
+  "engines": { "node": ">=24.0.0 <25" },
+  "packageManager": "npm@11.6.2",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:host": "node --experimental-vm-modules --test test/host/*.test.js",
+    "check": "node scripts/check.mjs",
+    "config": "node scripts/configure.mjs",
+    "fixtures": "node scripts/fetch-fixtures.mjs"
+  },
+  "dependencies": { "ws": "8.22.1" },
+  "devDependencies": { "icqq": "0.6.10", "lodash": "4.18.1", "moment": "2.30.1" }
+}

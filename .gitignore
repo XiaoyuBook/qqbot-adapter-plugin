@@ -1,0 +1,16 @@
+node_modules/
+.verification-cache/
+coverage/
+private/
+config/config.json
+config/*.local.*
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.secret
+*.tmp
+*.bak
+.DS_Store

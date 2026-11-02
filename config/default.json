@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "appId": "",
+  "sandbox": false,
+  "receiveGroup": true,
+  "receiveC2C": true,
+  "masterGroupOpenids": [],
+  "masterC2COpenids": [],
+  "allowedGroupOpenids": [],
+  "allowedC2COpenids": [],
+  "replyWindowSeconds": 240,
+  "maxReplies": 5,
+  "maxImageBytes": 4194304,
+  "requestTimeoutMs": 15000,
+  "reconnectMinMs": 1000,
+  "reconnectMaxMs": 60000
+}
