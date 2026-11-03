@@ -1,25 +1,40 @@
 import { EventEmitter } from 'node:events';
+import { createHash } from 'node:crypto';
 import { validateConfig } from '../src/config.js';
 import { AccountRegistry } from '../src/accounts.js';
 import { EventMapper } from '../src/events.js';
 
-export const config = patch => validateConfig({ appId: '123456', ...patch });
+// Keep explicit coverage for the original rich-media transport alongside the
+// mention-first integration tests, which opt into the production default.
+export const config = patch => validateConfig({ appId: '123456', mentionBeforeImage: false, ...patch });
 export const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000b49444154789c636000020000050001a5f645400000000049454e44ae426082', 'hex');
 export const quietLogger = () => {
   const records = [];
   return { records, info: value => records.push(value), warn: value => records.push(value), error: value => records.push(value) };
 };
 export const fakeApi = () => {
-  const calls = [];
+  const calls = [], uploads = [], materials = new Map(), prepared = new Map();
   return {
-    calls,
+    calls, uploads, materials,
     token: async () => 'fake-token', gateway: async () => 'wss://api.sgroup.qq.com/websocket',
     invalidateToken() { this.invalidated = (this.invalidated || 0) + 1; }, close() { this.closed = true; },
     route: (scope, target, resource) => `/v2/${scope === 'group' ? 'groups' : 'users'}/${target}/${resource}`,
     async request(method, route, body) {
       calls.push({ method, route, body });
+      if (method === 'GET' && route.startsWith('/v2/media-images')) return { images: [...materials.values()], next_cursor: '', total: materials.size };
+      if (route === '/v2/media-images/prepare') {
+        const id = `fake-upload-${calls.length}`; prepared.set(id, body);
+        return { upload_id: id, presigned_url: `https://unit.myqcloud.com/${id}` };
+      }
+      if (route === '/v2/media-images/complete') {
+        const source = prepared.get(body.upload_id), id = `fake-image-${source.md5}`;
+        const image = materials.get(id) ?? { image_id: id, url: `qqbot-media://image/v1/${id}`, ttl: 7776000, file_name: source.file_name };
+        materials.set(id, image); return image;
+      }
+      if (method === 'DELETE' && route.startsWith('/v2/media-images/')) { materials.delete(decodeURIComponent(route.split('/')[3])); return {}; }
       return route.endsWith('/files') ? { file_info: 'fake-file-info', ttl: 60 } : method === 'DELETE' || method === 'PUT' ? {} : { id: `sent-${calls.length}`, timestamp: 1 };
-    }
+    },
+    async uploadPart(url, bytes, contentType) { uploads.push({ url, bytes, contentType }); return { etag: createHash('md5').update(bytes).digest('hex') }; }
   };
 };
 export function host() {

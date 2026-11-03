@@ -6,7 +6,8 @@ import { eventContext } from './context.js';
 import { GroupOperations, boundedString } from './group.js';
 import { PassiveReply } from './reply.js';
 import { richSegment } from './rich.js';
-import { prepareMedia, uploadMedia, uploadMarkdownImage } from './media.js';
+import { prepareMedia, uploadMedia } from './media.js';
+import { ImageReplies } from './image-reply.js';
 import { acquireSegmentBridge } from './segment.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -35,7 +36,7 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.1' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.2.2' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),
@@ -45,7 +46,7 @@ export class AccountRegistry {
       sendPrivateMsg: () => { throw new AdapterError('PASSIVE_ONLY'); },
       sendGroupMsg: () => { throw new AdapterError('PASSIVE_ONLY'); },
       makeForwardMsg, segment: richSegment,
-      uploadMarkdownImage: async (file, name) => { this.checkOnline(); return uploadMarkdownImage(this.api, await prepareMedia('image', file, { ...this.config, maxImageBytes: Math.min(this.config.maxImageBytes, 10 * 1024 * 1024) }, name)); },
+      uploadMarkdownImage: async (file, name) => { this.checkOnline(); return this.imageReplies.persistent(await prepareMedia('image', file, { ...this.config, maxImageBytes: Math.min(this.config.maxImageBytes, 10 * 1024 * 1024) }, name)); },
       getMarkdownImages: async (cursor = '') => { this.checkOnline(); boundedString(cursor, 2048, true); return this.api.request('GET', `/v2/media-images${cursor ? `?${new URLSearchParams({ cursor })}` : ''}`); },
       deleteMarkdownImage: async id => { this.checkOnline(); boundedString(id, 256); await this.api.request('DELETE', `/v2/media-images/${encodeURIComponent(id)}/delete`); return true; },
       deleteMsg: id => this.deleteMsg(id), getMsg: unsupported,
@@ -55,7 +56,13 @@ export class AccountRegistry {
     this.account.sendPrivateMsg = (id, ...args) => this.send('c2c', this.openid(id, 'c2c-user'), ...args);
     this.account.sendGroupMsg = (id, ...args) => this.send('group', this.openid(id, 'group'), ...args);
   }
-  bindApi(api) { this.api = api; }
+  bindApi(api) {
+    this.api = api;
+    if (this.imageReplies?.api !== api) {
+      this.imageReplies?.close();
+      this.imageReplies = new ImageReplies(api, { logger: this.logger, timers: this.timers });
+    }
+  }
   checkOnline() { if (!this.online || !this.api) throw new AdapterError('OFFLINE'); }
   checkTarget(scope, target) {
     if (!validOpenid(target)) throw new AdapterError('OPERATION_INVALID');
@@ -177,6 +184,7 @@ export class AccountRegistry {
   }
   dispose() {
     this.abort.abort();
+    this.imageReplies?.close();
     this.releaseSegment();
     for (const handle of this.timerHandles) this.timers.clearTimeout(handle);
     this.timerHandles.clear(); this.messages.clear(); this.recalls.clear();

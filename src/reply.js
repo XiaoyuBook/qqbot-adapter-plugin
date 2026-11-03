@@ -85,6 +85,7 @@ async function messageParts(message, config, context) {
       continue;
     } else if (item?.type === 'at') {
       if (context.scope !== 'group') throw new AdapterError('UNSUPPORTED_MESSAGE');
+      context.explicitMention = true;
       const id = item.id ?? item.qq;
       if (id === 'all') richText += '<qqbot-at-everyone />';
       else {
@@ -123,6 +124,7 @@ async function messageParts(message, config, context) {
     else if (last?.body?.msg_type === 2) last.body.keyboard = native;
     else combined.push({ body: { msg_type: 2, markdown: markdown('请选择操作'), keyboard: native } });
   }
+  if (context.imageMention && !context.explicitMention) for (const part of combined) if (part.media?.fileType === 1) part.mentionFirst = true;
   if (!combined.length) throw new AdapterError('UNSUPPORTED_MESSAGE');
   return combined;
 }
@@ -221,21 +223,33 @@ export class PassiveReply {
         this.#check();
         validateOptions(quote, extra);
         if (extra?.recallMsg && !this.registry) throw new AdapterError('UNSUPPORTED_OPTIONS');
-        const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, warn: code => this.warn(code), extra, quote };
+        const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, warn: code => this.warn(code), extra, quote,
+          imageMention: this.config.mentionBeforeImage && this.scope === 'group' && !this.proactive && this.senderId && extra?.at !== false };
         const parts = await messageParts(message, this.config, context);
         const reference = this.reference(context.quote);
         if (this.sequence + parts.length > this.limit) throw new AdapterError('REPLY_LIMIT');
         const sent = [];
+        const post = body => this.#post(reference ? { ...body, message_reference: reference } : body, extra?.recallMsg);
         for (const part of parts) {
           let body;
           if (part.media) {
             this.#check();
+            if (part.mentionFirst && this.registry?.imageReplies && (part.media.url || (part.media.size <= 10 * 1024 * 1024 && ['png', 'jpg', 'gif', 'webp'].includes(part.media.extension)))) {
+              const id = this.registry.openid(this.senderId, 'group-user');
+              const caption = escapeMarkdown((part.text || '').trim());
+              sent.push(await this.registry.imageReplies.send(part.media, async url => {
+                this.#check();
+                const image = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+                return post({ msg_type: 2, markdown: { content: `<qqbot-at-user id="${id}" />\n${caption ? caption + '\n' : ''}![图片](${image})`, force_verify_image_resource: true } });
+              }));
+              continue;
+            }
+            if (part.mentionFirst) this.warn('image_mention_layout_unavailable');
             const upload = await uploadMedia(this.api, this.scope, this.target, part.media, () => this.#check());
             if (typeof upload.file_info !== 'string' || !upload.file_info) throw new AdapterError('API_RESPONSE');
             body = { msg_type: 7, content: part.text || ' ', media: { file_info: upload.file_info } };
           } else body = part.body ?? { msg_type: 0, content: part.text };
-          if (reference) body = { ...body, message_reference: reference };
-          sent.push(await this.#post(body, extra?.recallMsg));
+          sent.push(await post(body));
         }
         return { ...sent.at(-1), message_ids: sent.map(item => item.message_id), ...(this.warnings.size ? { warnings: [...this.warnings] } : {}) };
       } catch (error) { return this.#failure(error); }

@@ -6,7 +6,7 @@ import { AdapterError } from './errors.js';
 
 export const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
 export const defaults = Object.freeze(JSON.parse(await fs.readFile(new URL('../config/default.json', import.meta.url), 'utf8')));
-const booleans = ['enabled', 'sandbox', 'receiveGroup', 'receiveC2C', 'receiveGroupMessages', 'receiveGroupNotices', 'allowProactive'];
+const booleans = ['enabled', 'sandbox', 'receiveGroup', 'receiveC2C', 'receiveGroupMessages', 'receiveGroupNotices', 'allowProactive', 'mentionBeforeImage'];
 const lists = ['masterGroupOpenids', 'masterC2COpenids', 'allowedGroupOpenids', 'allowedC2COpenids'];
 const ranges = { replyWindowSeconds: [1, 300], c2cReplyWindowSeconds: [1, 3600], maxReplies: [1, 5], maxImageBytes: [1, 209715200], maxMediaBytes: [1, 209715200], requestTimeoutMs: [1000, 120000], reconnectMinMs: [1000, 60000], reconnectMaxMs: [1000, 300000] };
 export const validOpenid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
