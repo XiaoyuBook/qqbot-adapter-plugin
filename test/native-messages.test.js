@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, payload, FakeTimers } from './helpers.js';
+import { fixture, payload, FakeTimers, png } from './helpers.js';
 import { AdapterError } from '../src/errors.js';
 
 test('Markdown, native keyboards and picture cards send their documented bodies without text field conflicts', async () => {
@@ -100,6 +100,41 @@ test('legacy segment bridge produces native buttons only in this adapter event a
   await f.mapper.dispatch(payload()); await Promise.all(tasks);
   assert.equal(f.api.calls[0].body.msg_type, 2); assert.equal(f.api.calls[0].body.keyboard.content.rows[0].buttons[0].action.type, 2);
   assert.equal(segment.button(), 'legacy no-op'); f.registry.dispose(); assert.equal(segment.button, original);
+});
+
+test('legacy navigation attached to media results omits its whitespace and extra reply', async t => {
+  const segment = { button: () => '' }, f = fixture({}, { segment }), pending = [];
+  t.after(() => f.registry.dispose());
+  f.bot.on('message', e => pending.push(e.reply([
+    { type: 'image', file: png }, '\n\n',
+    segment.button([{ text: '记录', callback: '#原石' }, { text: '统计', callback: '#原石统计' }])
+  ])));
+  await f.mapper.dispatch(payload()); await Promise.all(pending);
+  const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
+  assert.equal(messages.length, 1); assert.equal(messages[0].body.msg_type, 7);
+  assert.equal(messages[0].body.keyboard, undefined);
+  assert.ok(pending.length);
+});
+
+test('legacy selection prompts retain their buttons and trim only surrounding caption whitespace', async t => {
+  const segment = { button: () => '' }, f = fixture({}, { segment }), pending = [];
+  t.after(() => f.registry.dispose());
+  f.bot.on('message', e => pending.push(e.reply([
+    { type: 'image', file: png }, '\n\n请选择角色\n',
+    segment.button([{ text: '确认', callback: '#确认角色' }])
+  ])));
+  await f.mapper.dispatch(payload()); await Promise.all(pending);
+  const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].body.markdown.content, '请选择角色');
+  assert.equal(messages[1].body.keyboard.content.rows[0].buttons[0].action.data, '#确认角色');
+});
+
+test('explicit native keyboards attached to images are retained', async () => {
+  const f = fixture(), e = await f.mapper.dispatch(payload());
+  await e.reply([{ type: 'image', file: png }, e.bot.segment.button([{ text: '确认', input: '#确认' }])]);
+  const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
+  assert.equal(messages.length, 2); assert.equal(messages[1].body.keyboard.content.rows[0].buttons[0].action.data, '#确认');
 });
 
 test('definite button-permission denial falls back once without leaking callback data or retrying ambiguous delivery', async () => {

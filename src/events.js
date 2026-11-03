@@ -1,7 +1,7 @@
 import { validOpenid } from './config.js';
 import { identity, fixMaster, isMaster } from './identity.js';
 import { PassiveReply, installReply } from './reply.js';
-import { AdapterError, unsupported } from './errors.js';
+import { AdapterError } from './errors.js';
 import { eventContext } from './context.js';
 import { role } from './group.js';
 import { richSegment } from './rich.js';
@@ -70,8 +70,7 @@ export class EventMapper {
       message_id: d.id, time: Math.floor(timestamp / 1000), raw_message: content,
       sender, message: [], adapter: 'QQBot',
       isGroup: scope === 'group', isPrivate: scope === 'c2c', atBot,
-      qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment },
-      getAvatarUrl: unsupported
+      qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment }
     };
     if (atBot) event.message.push({ type: 'at', qq: this.registry.id, text: 'QQ 官方机器人' });
     if (scope === 'group' && Array.isArray(d.mentions)) {
@@ -102,7 +101,6 @@ export class EventMapper {
       void reply.fail(error);
       throw error;
     };
-    event.getAvatarUrl = rejectUnsupported;
     const userInfo = { user_id: userId, nickname: sender.nickname, card: sender.card, role: sender.role };
     if (scope === 'group') {
       this.registry.observeMember(groupId, userId, { ...userInfo, is_admin: ['admin', 'owner'].includes(sender.role), is_owner: sender.role === 'owner' });

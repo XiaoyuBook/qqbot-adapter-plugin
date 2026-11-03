@@ -4,7 +4,7 @@ import { isIP } from 'node:net';
 import { AdapterError, logFailure, safeError } from './errors.js';
 import { isForwardMessage, forwardContent } from './forward.js';
 import { prepareMedia, uploadMedia } from './media.js';
-import { markdown, keyboard, card, keyboardText } from './rich.js';
+import { markdown, keyboard, card, keyboardText, isLegacyButton } from './rich.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const optionContext = new AsyncLocalStorage();
@@ -53,6 +53,14 @@ async function messageParts(message, config, context) {
     return forward.items;
   });
   if (input.length > 1000) throw new AdapterError('UNSUPPORTED_MESSAGE');
+  const media = item => Buffer.isBuffer(item) || item instanceof Uint8Array || ['image', 'record', 'audio', 'video', 'file', 'media'].includes(item?.type);
+  const whitespace = item => typeof item === 'string' ? !item.trim() : item?.type === 'text' && typeof item.text === 'string' && !item.text.trim();
+  // Old plugins append navigation to every chart. Keep meaningful prompts and
+  // explicit native keyboards, but do not create a second bubble for that bar.
+  if (input.some(isLegacyButton) && input.some(media) && input.every(item => media(item) || whitespace(item) || isLegacyButton(item) || ['at', 'reply'].includes(item?.type))) {
+    input = input.filter(item => !isLegacyButton(item) && !whitespace(item));
+    context.warn('legacy_navigation_omitted');
+  }
   const parts = [];
   let buttons = context.extra?.keyboard ?? context.extra?.button;
   if (context.extra?.at) input = [{ type: 'at', qq: context.extra.at === true ? context.senderId : context.extra.at }, ...input];
@@ -111,7 +119,7 @@ async function messageParts(message, config, context) {
   }
   if (buttons !== undefined) {
     const native = keyboard(buttons, context.scope), last = combined.at(-1);
-    if (last?.text !== undefined && !last.media) { last.body = { msg_type: 2, markdown: markdown(escapeMarkdown(last.text)), keyboard: native }; delete last.text; }
+    if (last?.text !== undefined && !last.media) { last.body = { msg_type: 2, markdown: markdown(escapeMarkdown(last.text.trim()) || '请选择操作'), keyboard: native }; delete last.text; }
     else if (last?.body?.msg_type === 2) last.body.keyboard = native;
     else combined.push({ body: { msg_type: 2, markdown: markdown('请选择操作'), keyboard: native } });
   }

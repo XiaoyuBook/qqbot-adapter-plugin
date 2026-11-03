@@ -14,7 +14,10 @@
       "lib/bot.js": "798fdb7499c9c78fa9a8282acb08bb8643bd7f3b10909a4692d61c3e942717b3",
       "lib/puppeteer/puppeteer.js": "c489acb44799fb56c64b8c87e8bb9bdce4264df5591a3999ebd6c1f82294e6c2",
       "lib/common/common.js": "1f8b0d897fdbc3290921b8efe6a8e6e8724f320c530efcc59e8f381357c673a1",
-      "plugins/genshin/model/user.js": "d665990f20525443012350bdee9ef128f6a76a662486d435c7f5c729f51e484b"
+      "plugins/genshin/model/user.js": "d665990f20525443012350bdee9ef128f6a76a662486d435c7f5c729f51e484b",
+      "plugins/genshin/model/roleIndex.js": "118c48e771450535ec8dece0528a0309045ae87dc3da3f180b830ba427e0f313",
+      "plugins/genshin/apps/role.js": "580e690990194ec3261739f05d9de5447fb2ebc8753c850149831f2390fdbc05",
+      "plugins/genshin/apps/ledger.js": "9d3f15e11e6ce3174761c164835fab70dbd98ba5d6bcf1fa44cefccb49125ad4"
     }
   },
   "xiaoyao": {

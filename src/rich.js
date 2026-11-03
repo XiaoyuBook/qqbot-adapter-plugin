@@ -3,6 +3,13 @@ import { AdapterError } from './errors.js';
 import { mediaUrl } from './media.js';
 
 const invalid = () => { throw new AdapterError('UNSUPPORTED_OPTIONS'); };
+const legacyButtons = new WeakSet();
+export function legacyButton(...data) {
+  const element = { type: 'button', data };
+  legacyButtons.add(element);
+  return element;
+}
+export const isLegacyButton = value => legacyButtons.has(value);
 function text(value, maximum, empty = false) {
   if (typeof value !== 'string' || (!empty && !value) || value.length > maximum || value.includes('\0')) invalid();
   return value;

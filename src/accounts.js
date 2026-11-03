@@ -11,9 +11,10 @@ import { acquireSegmentBridge } from './segment.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const owners = new WeakMap();
-const unsupportedMethods = ['getAvatarUrl', 'getChatHistory', 'recallMsg', 'getMemberMap', 'getMemberList', 'muteMember', 'muteAll', 'kickMember', 'setCard', 'setName', 'setAdmin', 'pokeMember', 'sendFile', 'uploadFile', 'thumbUp', 'getSimpleInfo', 'getFileUrl', 'mute', 'kick', 'poke', 'quit', 'setTitle', 'renew'];
+const unsupportedMethods = ['getChatHistory', 'recallMsg', 'getMemberMap', 'getMemberList', 'muteMember', 'muteAll', 'kickMember', 'setCard', 'setName', 'setAdmin', 'pokeMember', 'sendFile', 'uploadFile', 'thumbUp', 'getSimpleInfo', 'getFileUrl', 'mute', 'kick', 'poke', 'quit', 'setTitle', 'renew'];
 
 export function contact(info, sendMsg = () => { throw new AdapterError('PASSIVE_ONLY'); }, rejectUnsupported = unsupported) {
+  // Optional avatar probes must stay absent so plugins can use their own fallback.
   const result = { ...info, info: { ...info }, sendMsg, makeForwardMsg };
   for (const name of unsupportedMethods) result[name] = rejectUnsupported;
   return result;
@@ -34,7 +35,7 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.0' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.2.1' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),
