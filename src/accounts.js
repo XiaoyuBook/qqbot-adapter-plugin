@@ -8,6 +8,8 @@ import { PassiveReply } from './reply.js';
 import { richSegment } from './rich.js';
 import { prepareMedia, uploadMedia } from './media.js';
 import { ImageReplies } from './image-reply.js';
+import { GroupRequests } from './requests.js';
+import { ApprovalStrategies } from './approval-strategies.js';
 import { acquireSegmentBridge } from './segment.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -16,7 +18,10 @@ const unsupportedMethods = ['getChatHistory', 'recallMsg', 'getMemberMap', 'getM
 
 export function contact(info, sendMsg = () => { throw new AdapterError('PASSIVE_ONLY'); }, rejectUnsupported = unsupported) {
   // Optional avatar probes must stay absent so plugins can use their own fallback.
-  const result = { ...info, info: { ...info }, sendMsg, makeForwardMsg };
+  const result = { info: { ...info }, sendMsg, makeForwardMsg };
+  for (const key of new Set([...Object.keys(info), 'nickname', 'card', 'role', 'group_name', 'member_count'])) {
+    Object.defineProperty(result, key, { enumerable: true, configurable: true, get: () => result.info[key], set: value => { result.info[key] = value; } });
+  }
   for (const name of unsupportedMethods) result[name] = rejectUnsupported;
   return result;
 }
@@ -33,11 +38,13 @@ export class AccountRegistry {
     this.abort = new AbortController();
     this.sleep = sleep ?? (ms => delay(ms, undefined, { signal: this.abort.signal }));
     this.messages = new Map(); this.timerHandles = new Set(); this.recalls = new Map();
+    this.groupStates = new Map(); this.groupStatePending = new Map(); this.groupStateQueries = [];
+    this.groupRequests = new GroupRequests(this); this.approvalStrategies = new ApprovalStrategies(this);
     this.releaseSegment = acquireSegmentBridge(this, segment);
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.3' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.2.7' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),
@@ -52,7 +59,17 @@ export class AccountRegistry {
       deleteMarkdownImage: async id => { this.checkOnline(); boundedString(id, 256); await this.api.request('DELETE', `/v2/media-images/${encodeURIComponent(id)}/delete`); return true; },
       deleteMsg: id => this.deleteMsg(id), getMsg: unsupported,
       getGroupInfo: id => this.group(this.openid(id, 'group')).getInfo(),
-      getGroupMemberInfo: (groupId, userId) => this.group(this.openid(groupId, 'group')).getMemberInfo(userId)
+      getGroupMemberInfo: (groupId, userId) => this.group(this.openid(groupId, 'group')).getMemberInfo(userId),
+      getGroupMemberList: groupId => this.group(this.openid(groupId, 'group')).getMemberMap(),
+      pickMember: (groupId, userId) => this.account.pickGroup(groupId).pickMember(userId),
+      setGroupBan: (groupId, userId, seconds) => this.group(this.openid(groupId, 'group')).muteMember(userId, seconds),
+      setGroupKick: (groupId, userId, block = false, reason = '') => this.group(this.openid(groupId, 'group')).kickMember(userId, reason, block),
+      setGroupWholeBan: () => { throw new AdapterError('GROUP_WHOLE_MUTE_UNSUPPORTED'); },
+      setGroupAdmin: unsupported, setGroupCard: unsupported, setGroupName: unsupported, setGroupSpecialTitle: unsupported,
+      getSystemMsg: () => this.groupRequests.list(),
+      setGroupAddRequest: (...args) => this.groupRequests.approve(...args),
+      getJoinApprovalStrategies: (...args) => this.approvalStrategies.list(...args),
+      executeJoinApprovalStrategy: (...args) => this.approvalStrategies.execute(...args)
     };
     this.account.sendPrivateMsg = (id, ...args) => this.send('c2c', this.openid(id, 'c2c-user'), ...args);
     this.account.sendGroupMsg = (id, ...args) => this.send('group', this.openid(id, 'group'), ...args);
@@ -78,11 +95,40 @@ export class AccountRegistry {
   }
   userId(kind, openid) { return this.identities.userId(kind, openid); }
   group(target) { return new GroupOperations(this, target); }
+  currentContext() { const current = eventContext.getStore(); return current?.registry === this ? current : null; }
+  observeGroupState(target, data) {
+    if (!this.online) return;
+    if (!this.groupStates.has(target) && this.groupStates.size >= 1000) this.groupStates.delete(this.groupStates.keys().next().value);
+    this.groupStates.set(target, { value: { member_openid: data.member_openid, member_role: data.member_role }, expiresAt: this.now() + 60000 });
+    const groupId = identity(this.config.appId, 'group', target), userId = this.userId('group-user', data.member_openid);
+    this.observeMember(groupId, userId, { user_id: userId, nickname: this.account.nickname, card: this.account.nickname, role: data.member_role, is_admin: ['admin', 'owner'].includes(data.member_role), is_owner: data.member_role === 'owner' });
+  }
+  async ensureGroupState(target) {
+    this.checkTarget('group', target);
+    const cached = this.groupStates.get(target);
+    if (cached && cached.expiresAt > this.now()) return cached.value;
+    if (this.groupStatePending.has(target)) return cached?.value ?? this.groupStatePending.get(target);
+    this.groupStateQueries = this.groupStateQueries.filter(at => this.now() - at < 60000);
+    if (this.groupStateQueries.length >= 25) return cached?.value;
+    this.groupStateQueries.push(this.now());
+    const operation = this.group(target).getBotState().catch(error => {
+      if (this.online) {
+        if (!this.groupStates.has(target) && this.groupStates.size >= 1000) this.groupStates.delete(this.groupStates.keys().next().value);
+        this.groupStates.set(target, { value: undefined, expiresAt: this.now() + 30000 });
+        logFailure(this.logger, 'group_state', error);
+      }
+      return undefined;
+    }).finally(() => this.groupStatePending.delete(target));
+    this.groupStatePending.set(target, operation);
+    // Existing groups refresh in the background; their ordinary image replies
+    // do not wait for a role query on every cache expiry.
+    return cached ? cached.value : operation;
+  }
   context(scope, target) { const current = eventContext.getStore(); return current?.registry === this && current.scope === scope && current.target === target ? current : null; }
   send(scope, target, ...args) {
     this.checkTarget(scope, target);
     const current = this.context(scope, target);
-    if (current) return current.reply.send(...args);
+    if (current?.reply) return current.reply.send(...args);
     if (!this.config.allowProactive) throw new AdapterError('PASSIVE_ONLY');
     if (!(scope === 'group' ? this.account.gl : this.account.fl).has(scope === 'group' ? identity(this.config.appId, 'group', target) : this.userId('c2c-user', target))) throw new AdapterError('MESSAGE_UNKNOWN');
     this.checkOnline();
@@ -135,17 +181,28 @@ export class AccountRegistry {
     if (scope === 'group') {
       const group = this.group(target);
       const memberContacts = new Map();
-      for (const name of ['getInfo', 'getMembers', 'getMemberMap', 'getMemberInfo', 'muteMember', 'kickMember', 'removeMembers', 'getBotState', 'getMuteState', 'getJoinRequests', 'approveJoinRequest', 'getBlacklist', 'setBlacklist']) result[name] = (...args) => group[name](...args);
+      Object.defineProperties(result, {
+        is_admin: { enumerable: true, get: () => ['admin', 'owner'].includes(this.groupStates.get(target)?.value?.member_role) },
+        is_owner: { enumerable: true, get: () => this.groupStates.get(target)?.value?.member_role === 'owner' }
+      });
+      for (const name of ['getInfo', 'getMembers', 'getMemberMap', 'getMemberInfo', 'muteMember', 'kickMember', 'removeMembers', 'getBotState', 'getMuteState', 'getMutedMembers', 'getJoinRequests', 'approveJoinRequest', 'getBlacklist', 'setBlacklist']) result[name] = (...args) => group[name](...args);
+      result.mute = result.muteMember; result.kick = result.kickMember;
+      result.muteAll = () => { throw new AdapterError('GROUP_WHOLE_MUTE_UNSUPPORTED'); };
+      result.executeJoinApprovalStrategy = id => this.approvalStrategies.execute(id, target);
       result.getMemberList = async () => [...(await group.getMemberMap()).values()];
       result.renew = async () => Object.assign(result.info, await group.getInfo());
       result.pickMember = id => {
         id = this.userId('group-user', group.memberId(id));
         if (memberContacts.has(id)) return memberContacts.get(id);
         const cached = this.account.gml.get(group.id)?.get(id) || { user_id: id, nickname: 'QQBot 用户', card: 'QQBot 用户', role: 'member' };
-        const member = contact(cached, undefined, rejectUnsupported); member._info = member.info;
+        const member = contact(cached, undefined, rejectUnsupported); member.info = cached; member._info = member.info;
+        Object.defineProperties(member, {
+          is_admin: { enumerable: true, get: () => ['admin', 'owner'].includes(member.info.role) },
+          is_owner: { enumerable: true, get: () => member.info.role === 'owner' }
+        });
         member.renew = async () => Object.assign(member.info, await group.getMemberInfo(id));
-        member.getSimpleInfo = () => group.getMemberInfo(id);
-        member.mute = seconds => group.muteMember(id, seconds); member.kick = block => group.kickMember(id, block);
+        member.getInfo = member.renew; member.getSimpleInfo = member.renew;
+        member.mute = seconds => group.muteMember(id, seconds); member.kick = (...args) => group.kickMember(id, ...args);
         member.muteMember = member.mute; member.kickMember = member.kick;
         memberContacts.set(id, member); return member;
       };
@@ -154,7 +211,9 @@ export class AccountRegistry {
   }
   observeMember(groupId, userId, info) {
     if (!this.account.gml.has(groupId)) { if (this.account.gml.size >= 1000) this.account.gml.delete(this.account.gml.keys().next().value); this.account.gml.set(groupId, new Map()); }
-    const members = this.account.gml.get(groupId); members.set(userId, info);
+    const members = this.account.gml.get(groupId);
+    if (members.has(userId)) Object.assign(members.get(userId), info);
+    else members.set(userId, info);
     if (members.size > 5000) members.delete(members.keys().next().value);
   }
   #pick(id, kind, list) {
@@ -194,6 +253,7 @@ export class AccountRegistry {
     this.releaseSegment();
     for (const handle of this.timerHandles) this.timers.clearTimeout(handle);
     this.timerHandles.clear(); this.messages.clear(); this.recalls.clear();
+    this.groupStates.clear(); this.groupStatePending.clear(); this.groupStateQueries = []; this.groupRequests.close();
     this.setOnline(false);
     if (this.host[this.id] === this.account) delete this.host[this.id];
     owners.delete(this.account);

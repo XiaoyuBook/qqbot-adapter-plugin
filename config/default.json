@@ -6,6 +6,7 @@
   "receiveC2C": true,
   "receiveGroupMessages": false,
   "receiveGroupNotices": false,
+  "groupManagement": false,
   "allowProactive": false,
   "mentionBeforeImage": true,
   "userIdMappings": {},

@@ -1,0 +1,13 @@
+{
+  "name": "yenai-plugin",
+  "version": "2.0.0",
+  "source": "https://gitee.com/yeyang52/yenai-plugin",
+  "provenance": "Installed public source snapshot; directory has no independent Git metadata. Do not substitute the parent Miao repository commit.",
+  "license": "GPL-3.0",
+  "files": {
+    "model/GroupAdmin.js": "c296d7350a7a3588e9076df8ffb59d93cf7e46a0c35bee839d509888509f8cf0",
+    "apps/groupAdmin/groupAdmin.js": "5956dddbbc49d05ae5173d1daec311c10f576a6ec243b9af2ecb33857a42e666",
+    "apps/groupAdmin/groupVerify.js": "fff7cff75399904b3b84c6f51699e9b3e0a316b278e77a46ba6ea609fa314be4",
+    "lib/common/common.js": "7e32dbc16fe49aa7f31127c4c4ce05fd9f1d30676854f6c88caf438b4cc83408"
+  }
+}

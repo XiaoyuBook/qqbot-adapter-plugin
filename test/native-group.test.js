@@ -71,6 +71,6 @@ test('full group messages and group membership/request events require their expl
   const calls = []; f.api.request = async (...args) => { calls.push(args); return {}; };
   assert.equal(await requests[0].approve(true), true); assert.equal(calls[0][2].join_request_id, 'join-request');
   await f.mapper.dispatch({ t: 'GROUP_MEMBER_ADD', id: 'member-event', d: { group_openid: 'group-openid', member_openid: 'member-b', timestamp: Math.floor(Date.now() / 1000) } });
-  assert.equal(notices.length, 1); assert.equal(notices[0].notice_type, 'increase');
+  assert.equal(notices.length, 1); assert.equal(notices[0].notice_type, 'group'); assert.equal(notices[0].sub_type, 'increase');
   assert.equal(notices[0].user_id, memberId);
 });

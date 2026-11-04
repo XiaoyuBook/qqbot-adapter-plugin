@@ -92,6 +92,7 @@ export function card(value) {
   return { type: 'tuwen', content: { title: text(value.content.title, 50), description: text(value.content.description, 200), url: mediaUrl(text(value.content.url, 1024)), pic_url: mediaUrl(text(value.content.pic_url, 1024)) } };
 }
 export const richSegment = Object.freeze({
+  at: (qq, text) => ({ type: 'at', qq, ...(typeof text === 'string' ? { text } : {}) }),
   markdown: data => ({ type: 'markdown', data }),
   button: (...data) => ({ type: 'button', data }),
   keyboard: data => ({ type: 'keyboard', data }),

@@ -16,6 +16,7 @@ export function createGuobaSupport({ store, reload = async () => {} }) {
         { field: 'receiveC2C', label: '接收 C2C', component: 'Switch' },
         { field: 'receiveGroupMessages', label: '免 @ 触发群指令', component: 'Switch', bottomHelpMessage: '开启后直接发送 #角色记录 等指令即可。还须在 QQ 群的机器人设置中允许接收全部消息，并将喵崽对应群的 onlyReplyAt 设为 0；不会自动修改其他群的触发设置。' },
         { field: 'receiveGroupNotices', label: '接收入群申请和成员变动', component: 'Switch', bottomHelpMessage: '入群申请事件要求机器人是管理员；处理申请由已安装的业务插件决定。' },
+        { field: 'groupManagement', label: '群管插件兼容', component: 'Switch', bottomHelpMessage: '读取并缓存机器人在群内的真实身份，供群管插件判断权限；不会授予主人权限。事件接收、QQ群内授权及各接口权限仍需分别满足。' },
         { field: 'allowProactive', label: '允许插件主动发送', component: 'Switch', bottomHelpMessage: '开启后允许插件定时或跨会话发送到已知联系人；仍受平台授权和频率限制。事件内回复不需要开启。' },
         { field: 'mentionBeforeImage', label: '群图片：上方 @，下方图片', component: 'Switch', bottomHelpMessage: '同一条消息内排版；私聊不自动 @。关闭后使用普通图片消息。' },
         { field: 'userIdMappings', label: '旧 QQ 数据关联（管理员）', component: 'InputTextArea', bottomHelpMessage: 'JSON 对象：完整 QQBot 身份标识对应旧 QQ 号（字符串）。只关联已核实的账号；群聊、单聊分别设置，不改变主人授权。' },

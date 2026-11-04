@@ -86,5 +86,6 @@ test('missing upload result or platform failure never claims image success or au
 test('unsupported contact APIs raise explicit safe errors', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload());
   assert.equal(e.getAvatarUrl, undefined); assert.equal(e.member.getAvatarUrl, undefined);
-  for (const fn of [() => e.group.muteAll(), () => e.member.getChatHistory(), () => e.bot.sendGroupMsg(e.group_id, 'proactive')]) assert.throws(fn, error => ['UNSUPPORTED_API', 'PASSIVE_ONLY'].includes(error.code));
+  assert.throws(() => e.group.muteAll(), { code: 'GROUP_WHOLE_MUTE_UNSUPPORTED' });
+  for (const fn of [() => e.member.getChatHistory(), () => e.bot.sendGroupMsg(e.group_id, 'proactive')]) assert.throws(fn, error => ['UNSUPPORTED_API', 'PASSIVE_ONLY'].includes(error.code));
 });

@@ -17,6 +17,8 @@ export function apiRouteAllowed(method, route) {
   if (method === 'GET' && pathname === '/gateway') return !query;
   const id = '[A-Za-z0-9_-]{1,128}';
   const opaque = '(?:[A-Za-z0-9_.:@=+-]|%[A-Fa-f0-9]{2}){1,3072}';
+  if (method === 'GET' && pathname === '/v2/groups/join_approval_strategy') return true;
+  if (method === 'POST' && new RegExp(`^/v2/groups/join_approval_strategy/${id}/execute$`).test(pathname)) return true;
   if (method === 'POST' && /^\/v2\/media-images\/(prepare|complete)$/.test(pathname)) return true;
   if (method === 'GET' && pathname === '/v2/media-images') return true;
   if (method === 'DELETE' && new RegExp(`^/v2/media-images/${opaque}/delete$`).test(pathname)) return true;
@@ -122,7 +124,7 @@ export class OfficialApi {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `QQBot ${token}`, 'X-Union-Appid': this.config.appId },
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
-      }, false, ['DELETE', 'PUT'].includes(method) || /\/(upload_part_finish|restrict_chat_setting|approval_join_request\/[^/]+)$/.test(route));
+      }, false, ['DELETE', 'PUT'].includes(method) || /\/(upload_part_finish|restrict_chat_setting|approval_join_request\/[^/]+)$/.test(route) || /^\/v2\/groups\/join_approval_strategy\/[A-Za-z0-9_-]+\/execute$/.test(route));
     } catch (error) {
       // A 401 is a definite rejection; never retry ambiguous message POSTs/network failures.
       if (!retried && error instanceof AdapterError && error.status === 401) {

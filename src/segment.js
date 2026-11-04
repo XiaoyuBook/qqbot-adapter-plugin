@@ -7,7 +7,7 @@ export function acquireSegmentBridge(registry, segment = globalThis.segment) {
   let state = segment[bridgeKey];
   if (!state) {
     state = { owners: new Set(), methods: new Map() };
-    for (const name of ['button', 'markdown', 'card']) {
+    for (const name of ['at', 'button', 'markdown', 'card']) {
       if (typeof segment[name] !== 'function') continue;
       const original = segment[name];
       const wrapper = function (...args) {

@@ -6,6 +6,33 @@ import { eventContext } from './context.js';
 import { role } from './group.js';
 import { richSegment } from './rich.js';
 
+function groupContent(content, mentions, ownIds, registry, wasMentioned) {
+  const known = new Map(), seen = new Set(), parts = [];
+  if (mentions !== undefined && (!Array.isArray(mentions) || mentions.length > 100)) throw new AdapterError('EVENT_INVALID');
+  for (const item of mentions ?? []) {
+    const id = item?.member_openid ?? item?.id;
+    if (validOpenid(id)) known.set(id, item);
+  }
+  for (const id of ownIds) {
+    content = content.replace(new RegExp(`^\\s*<@!?${id}>\\s*`), () => { wasMentioned = true; return ''; });
+  }
+  content = content.trimStart();
+  let offset = 0;
+  for (const match of content.matchAll(/<@!?([A-Za-z0-9_-]{1,128})>/g)) {
+    const id = match[1];
+    // Only platform-provided mentions are parsed; typed tag-like text alone
+    // cannot supply a user identity or silently disappear from command text.
+    if (!known.has(id)) continue;
+    if (match.index > offset) parts.push({ type: 'text', text: content.slice(offset, match.index) });
+    if (ownIds.has(id)) wasMentioned = true;
+    else parts.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof known.get(id).username === 'string' ? known.get(id).username.slice(0, 200) : '' });
+    seen.add(id); offset = match.index + match[0].length;
+  }
+  if (offset < content.length) parts.push({ type: 'text', text: content.slice(offset) });
+  for (const [id, item] of known) if (!seen.has(id) && !ownIds.has(id)) parts.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof item.username === 'string' ? item.username.slice(0, 200) : '' });
+  return { content, parts, atBot: wasMentioned };
+}
+
 export class EventDeduplicator {
   constructor({ now = Date.now, ttlMs = 7200000, max = 20000 } = {}) { Object.assign(this, { now, ttlMs, max }); this.seen = new Map(); }
   claim(key) {
@@ -48,18 +75,19 @@ export class EventMapper {
     if (this.now() - createdAt > (scope === 'c2c' ? this.config.c2cReplyWindowSeconds : this.config.replyWindowSeconds) * 1000) return false;
     const key = JSON.stringify([this.config.appId, scope, target, d.id]);
     if (!this.dedup.claim(key)) return false;
+    if (scope === 'group' && this.config.groupManagement) {
+      await this.registry.ensureGroupState(target);
+      if (!this.registry.online) return false;
+    }
     const principalId = identity(this.config.appId, scope === 'group' ? 'group-user' : 'c2c-user', openid);
     const userId = this.registry.userId(scope === 'group' ? 'group-user' : 'c2c-user', openid);
     const groupId = scope === 'group' ? identity(this.config.appId, 'group', target) : undefined;
-    let content = d.content || '';
-    if (scope === 'group') {
-      // Only a leading mention of the READY identity may be removed.
-      if (this.platformBotId && /^[A-Za-z0-9_-]+$/.test(this.platformBotId)) content = content.replace(new RegExp(`^\\s*<@!?${this.platformBotId}>\\s*`), '');
-      content = content.trimStart();
-    }
+    const ownIds = new Set([this.platformBotId, this.registry.groupStates.get(target)?.value?.member_openid].filter(validOpenid));
+    const parsed = scope === 'group' ? groupContent(d.content || '', d.mentions, ownIds, this.registry, payload.t === 'GROUP_AT_MESSAGE_CREATE') : { content: d.content || '', parts: d.content ? [{ type: 'text', text: d.content }] : [], atBot: false };
+    const content = parsed.content;
     const nickname = typeof d.author.username === 'string' && d.author.username.length <= 200 ? d.author.username : 'QQBot 用户';
     const sender = { user_id: userId, nickname, card: nickname, role: role(d.author.member_role) };
-    const atBot = payload.t === 'GROUP_AT_MESSAGE_CREATE';
+    const atBot = parsed.atBot;
     const ext = Array.isArray(d.message_scene?.ext) ? d.message_scene.ext.filter(item => typeof item === 'string' && item.length <= 4096) : [];
     const referenceId = ext.find(item => item.startsWith('msg_idx='))?.slice(8);
     const sourceReference = ext.find(item => item.startsWith('ref_msg_idx='))?.slice(12);
@@ -74,14 +102,7 @@ export class EventMapper {
       qqbot: { appId: this.config.appId, scope, principalId, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment }
     };
     if (atBot) event.message.push({ type: 'at', qq: this.registry.id, text: 'QQ 官方机器人' });
-    if (scope === 'group' && Array.isArray(d.mentions)) {
-      if (d.mentions.length > 100) throw new AdapterError('EVENT_INVALID');
-      for (const mention of d.mentions) {
-        const id = mention?.member_openid ?? mention?.id;
-        if (validOpenid(id) && !mention.bot) event.message.push({ type: 'at', qq: this.registry.userId('group-user', id), text: typeof mention.username === 'string' ? mention.username.slice(0, 200) : '' });
-      }
-    }
-    if (content) event.message.push({ type: 'text', text: content });
+    event.message.push(...parsed.parts);
     for (const attachment of d.attachments || []) {
       const kind = attachment && (/^image\/(png|jpeg|gif|webp|bmp)$/.test(attachment.content_type) ? 'image' : attachment.content_type === 'voice' || /^audio\//.test(attachment.content_type) ? 'record' : attachment.content_type === 'video/mp4' ? 'video' : attachment.content_type === 'file' || attachment.content_type === 'application/octet-stream' ? 'file' : null);
       if (kind && typeof attachment.url === 'string') {
@@ -164,9 +185,13 @@ export class EventMapper {
     const timestamp = typeof d.timestamp === 'number' ? d.timestamp * 1000 : Date.parse(d.apply_at);
     if (!Number.isFinite(timestamp) || timestamp > this.now() + 60000 || this.now() - timestamp > 300000) return false;
     if (!this.dedup.claim(JSON.stringify([this.config.appId, payload.t, target, payload.id ?? d.join_request_id ?? `${openid}:${timestamp}`]))) return false;
+    if (this.config.groupManagement) {
+      await this.registry.ensureGroupState(target);
+      if (!this.registry.online) return false;
+    }
     const joining = payload.t === 'GROUP_JOIN_REQUEST';
     const type = payload.t === 'GROUP_MEMBER_ADD' ? 'increase' : payload.t === 'GROUP_MEMBER_REMOVE' ? 'decrease' : 'qqbot';
-    const event = { bot: this.registry.account, self_id: this.registry.id, post_type: joining ? 'request' : 'notice', ...(joining ? { request_type: 'group', sub_type: 'add' } : { notice_type: type, sub_type: payload.t.toLowerCase() }), group_id: groupId, user_id: userId, time: Math.floor(timestamp / 1000), isGroup: true, isPrivate: false, adapter: 'QQBot', qqbot: { appId: this.config.appId, scope: 'group', groupOpenid: target, userOpenid: openid, eventType: payload.t, compatibility: [], lastError: null } };
+    const event = { bot: this.registry.account, self_id: this.registry.id, post_type: joining ? 'request' : 'notice', ...(joining ? { request_type: 'group', sub_type: 'add' } : type === 'qqbot' ? { notice_type: 'qqbot', sub_type: payload.t.toLowerCase() } : { notice_type: 'group', sub_type: type }), group_id: groupId, user_id: userId, time: Math.floor(timestamp / 1000), isGroup: true, isPrivate: false, adapter: 'QQBot', sender: { user_id: userId, nickname: typeof d.username === 'string' ? d.username.slice(0, 200) : 'QQBot 用户', role: 'member' }, ...(validOpenid(d.op_member_openid) ? { operator_id: this.registry.userId('group-user', d.op_member_openid) } : {}), qqbot: { appId: this.config.appId, scope: 'group', groupOpenid: target, userOpenid: openid, eventType: payload.t, compatibility: [], lastError: null } };
     fixMaster(event, isMaster(this.config, 'group', openid));
     this.registry.observe(this.registry.account.gl, groupId, { group_id: groupId, name: 'QQBot 群' });
     let reply;
@@ -175,15 +200,21 @@ export class EventMapper {
       installReply(event, reply);
     }
     event.group = this.registry.contact('group', target, this.registry.account.gl.get(groupId), reply);
+    event.member = event.group.pickMember(userId);
     if (joining) {
       if (typeof d.join_request_id !== 'string' || !d.join_request_id || d.join_request_id.length > 1024) throw new AdapterError('EVENT_INVALID');
-      event.flag = d.join_request_id;
-      event.comment = typeof d.verify_info?.verify_message === 'string' ? d.verify_info.verify_message.slice(0, 4000) : '';
-      event.approve = (approve = true, reason = '') => this.registry.group(target).approveJoinRequest(userId, d.join_request_id, approve, reason);
+      Object.assign(event, this.registry.groupRequests.observe(target, d));
     }
-    const emit = () => this.registry.host.emit(joining ? 'request' : 'notice', event);
-    if (reply) eventContext.run({ registry: this.registry, event, reply, scope: 'group', target }, emit);
-    else emit();
+    const root = joining ? 'request' : 'notice';
+    const category = joining ? 'group' : event.notice_type;
+    const emit = () => {
+      // Direct Bot.on('notice.group.increase') listeners and the host root
+      // loader each receive their conventional name exactly once.
+      this.registry.host.emit(`${root}.${category}.${event.sub_type}`, event);
+      this.registry.host.emit(`${root}.${category}`, event);
+      this.registry.host.emit(root, event);
+    };
+    eventContext.run({ registry: this.registry, event, reply, scope: 'group', target }, emit);
     return event;
   }
 }

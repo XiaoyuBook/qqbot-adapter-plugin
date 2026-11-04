@@ -10,7 +10,14 @@ export function boundedString(value, max = 2048, empty = false) {
 export function role(value) { return ['member', 'admin', 'owner'].includes(value) ? value : 'member'; }
 export class GroupOperations {
   constructor(registry, target) { registry.checkTarget('group', target); this.registry = registry; this.target = target; this.id = identity(registry.config.appId, 'group', target); }
-  memberId(value) { return this.registry.openid(value, 'group-user'); }
+  memberId(value) {
+    if (value === this.registry.id) {
+      const own = this.registry.groupStates.get(this.target)?.value?.member_openid;
+      if (!validOpenid(own)) invalid();
+      return own;
+    }
+    return this.registry.openid(value, 'group-user');
+  }
   async request(method, resource, body, query) {
     this.registry.checkOnline();
     let route = this.registry.api.route('group', this.target, resource);
@@ -54,7 +61,16 @@ export class GroupOperations {
     await this.request('POST', 'restrict_chat_setting', { members: [{ op: seconds ? 'add' : 'del', member_openid: this.memberId(userId), mute_expire_at: seconds ? new Date(this.registry.now() + seconds * 1000).toISOString() : '' }] });
     return true;
   }
-  async kickMember(userId, block = false) { return this.removeMembers([userId], block); }
+  async kickMember(userId, reasonOrBlock, block) {
+    if (typeof reasonOrBlock === 'boolean') {
+      if (block !== undefined) invalid();
+      block = reasonOrBlock;
+    } else {
+      if (reasonOrBlock !== undefined && typeof reasonOrBlock !== 'string') invalid();
+      if (reasonOrBlock) throw new AdapterError('UNSUPPORTED_API');
+    }
+    return this.removeMembers([userId], block ?? false);
+  }
   async removeMembers(userIds, block = false) {
     if (!Array.isArray(userIds) || !userIds.length || userIds.length > 20 || typeof block !== 'boolean') invalid();
     const data = await this.request('POST', 'batch_remove_members', { member_openids: [...new Set(userIds.map(id => this.memberId(id)))], add_to_member_blacklist: block });
@@ -62,7 +78,20 @@ export class GroupOperations {
     if ((block && !Array.isArray(data.add_to_member_blacklist_fail_openids)) || data.add_to_member_blacklist_fail_openids?.length) throw new AdapterError('PARTIAL_FAILURE');
     return true;
   }
-  async getBotState() { const data = await this.request('GET', 'bot_state'); if (!validOpenid(data.member_openid) || !['member', 'admin', 'owner'].includes(data.member_role)) throw new AdapterError('API_RESPONSE'); return data; }
+  async getBotState() {
+    const data = await this.request('GET', 'bot_state');
+    if (!validOpenid(data.member_openid) || !['member', 'admin', 'owner'].includes(data.member_role)) throw new AdapterError('API_RESPONSE');
+    this.registry.observeGroupState(this.target, data); return data;
+  }
+  async getMutedMembers() {
+    const data = await this.getMuteState();
+    return data.members.map(item => {
+      if (!validOpenid(item?.member_openid) || !Number.isFinite(Date.parse(item.mute_expire_at))) throw new AdapterError('API_RESPONSE');
+      const userId = this.registry.userId('group-user', item.member_openid);
+      const known = this.registry.account.gml.get(this.id)?.get(userId) ?? {};
+      return { ...known, user_id: userId, nickname: typeof item.username === 'string' ? item.username : known.nickname ?? 'QQBot 用户', shutup_time: Math.floor(Date.parse(item.mute_expire_at) / 1000), shut_up_timestamp: Math.floor(Date.parse(item.mute_expire_at) / 1000) };
+    });
+  }
   async getMuteState() { const data = await this.request('GET', 'restrict_chat_setting'); if (!Array.isArray(data.members) || !data.global_rule) throw new AdapterError('API_RESPONSE'); return data; }
   async getJoinRequests(cursor = '', limit = 20) {
     boundedString(cursor, 2048, true); if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid();
