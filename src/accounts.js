@@ -1,4 +1,4 @@
-import { accountId, identity } from './identity.js';
+import { accountId, identity, UserIdentities } from './identity.js';
 import { AdapterError, unsupported, logFailure, safeError } from './errors.js';
 import { makeForwardMsg } from './forward.js';
 import { validOpenid } from './config.js';
@@ -27,6 +27,7 @@ export class AccountRegistry {
     this.host = host;
     this.config = config;
     this.id = accountId(config.appId);
+    this.identities = new UserIdentities(config.appId, config.userIdMappings);
     this.online = false;
     Object.assign(this, { now, logger, timers });
     this.abort = new AbortController();
@@ -36,7 +37,7 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.2' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.2.3' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),
@@ -70,10 +71,12 @@ export class AccountRegistry {
     if (allowed.length && !allowed.includes(target)) throw new AdapterError('TARGET_DENIED');
   }
   openid(id, kind) {
+    if (kind === 'group-user' || kind === 'c2c-user') return this.identities.openid(id, kind);
     const prefix = `${this.id}:${kind}:`;
     if (typeof id !== 'string' || !id.startsWith(prefix) || !validOpenid(id.slice(prefix.length))) throw new AdapterError('OPERATION_INVALID');
     return id.slice(prefix.length);
   }
+  userId(kind, openid) { return this.identities.userId(kind, openid); }
   group(target) { return new GroupOperations(this, target); }
   context(scope, target) { const current = eventContext.getStore(); return current?.registry === this && current.scope === scope && current.target === target ? current : null; }
   send(scope, target, ...args) {
@@ -81,7 +84,7 @@ export class AccountRegistry {
     const current = this.context(scope, target);
     if (current) return current.reply.send(...args);
     if (!this.config.allowProactive) throw new AdapterError('PASSIVE_ONLY');
-    if (!(scope === 'group' ? this.account.gl : this.account.fl).has(identity(this.config.appId, scope === 'group' ? 'group' : 'c2c-user', target))) throw new AdapterError('MESSAGE_UNKNOWN');
+    if (!(scope === 'group' ? this.account.gl : this.account.fl).has(scope === 'group' ? identity(this.config.appId, 'group', target) : this.userId('c2c-user', target))) throw new AdapterError('MESSAGE_UNKNOWN');
     this.checkOnline();
     return new PassiveReply({ registry: this, api: this.api, config: this.config, scope, target, proactive: true, online: () => this.online, logger: this.logger, now: this.now }).send(...args);
   }
@@ -136,7 +139,7 @@ export class AccountRegistry {
       result.getMemberList = async () => [...(await group.getMemberMap()).values()];
       result.renew = async () => Object.assign(result.info, await group.getInfo());
       result.pickMember = id => {
-        group.memberId(id);
+        id = this.userId('group-user', group.memberId(id));
         if (memberContacts.has(id)) return memberContacts.get(id);
         const cached = this.account.gml.get(group.id)?.get(id) || { user_id: id, nickname: 'QQBot 用户', card: 'QQBot 用户', role: 'member' };
         const member = contact(cached, undefined, rejectUnsupported); member._info = member.info;
@@ -155,8 +158,11 @@ export class AccountRegistry {
     if (members.size > 5000) members.delete(members.keys().next().value);
   }
   #pick(id, kind, list) {
-    if (typeof id !== 'string' || !id.startsWith(`${this.id}:${kind}:`) || !list.has(id)) throw new AdapterError('UNSUPPORTED_API');
-    return this.contact(kind === 'group' ? 'group' : 'c2c', this.openid(id, kind), list.get(id));
+    let openid;
+    try { openid = this.openid(id, kind); } catch { throw new AdapterError('UNSUPPORTED_API'); }
+    const key = kind === 'group' ? identity(this.config.appId, kind, openid) : this.userId(kind, openid);
+    if (!list.has(key)) throw new AdapterError('UNSUPPORTED_API');
+    return this.contact(kind === 'group' ? 'group' : 'c2c', openid, list.get(key));
   }
   register() {
     if (this.host[this.id] && this.host[this.id] !== this.account) throw new AdapterError('ACCOUNT_COLLISION');

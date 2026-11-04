@@ -19,7 +19,7 @@ export class GroupOperations {
   }
   member(data) {
     if (!validOpenid(data?.member_openid)) throw new AdapterError('API_RESPONSE');
-    const userId = identity(this.registry.config.appId, 'group-user', data.member_openid);
+    const userId = this.registry.userId('group-user', data.member_openid);
     const info = { user_id: userId, nickname: typeof data.username === 'string' ? data.username : 'QQBot 用户', card: typeof data.username === 'string' ? data.username : 'QQBot 用户', role: role(data.member_role), is_admin: ['admin', 'owner'].includes(data.member_role), is_owner: data.member_role === 'owner', ...(Number.isFinite(Date.parse(data.joined_at)) ? { join_time: Math.floor(Date.parse(data.joined_at) / 1000) } : {}) };
     this.registry.observeMember(this.id, userId, info);
     return info;

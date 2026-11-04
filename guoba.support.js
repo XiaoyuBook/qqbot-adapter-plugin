@@ -18,6 +18,7 @@ export function createGuobaSupport({ store, reload = async () => {} }) {
         { field: 'receiveGroupNotices', label: '接收入群申请和成员变动', component: 'Switch', bottomHelpMessage: '入群申请事件要求机器人是管理员；处理申请由已安装的业务插件决定。' },
         { field: 'allowProactive', label: '允许插件主动发送', component: 'Switch', bottomHelpMessage: '开启后允许插件定时或跨会话发送到已知联系人；仍受平台授权和频率限制。事件内回复不需要开启。' },
         { field: 'mentionBeforeImage', label: '群图片：上方 @，下方图片', component: 'Switch', bottomHelpMessage: '同一条消息内排版；私聊不自动 @。关闭后使用普通图片消息。' },
+        { field: 'userIdMappings', label: '旧 QQ 数据关联（管理员）', component: 'InputTextArea', bottomHelpMessage: 'JSON 对象：完整 QQBot 身份标识对应旧 QQ 号（字符串）。只关联已核实的账号；群聊、单聊分别设置，不改变主人授权。' },
         ...listFields.map(field => ({ field, label: ({ masterGroupOpenids: '授权主人 member_openid（群）', masterC2COpenids: '授权主人 user_openid（C2C）', allowedGroupOpenids: '允许的 group_openid', allowedC2COpenids: '允许的 user_openid' })[field], component: 'InputTextArea', bottomHelpMessage: '每行一个原始 OpenID；两个场景分别配置。空白名单允许全部，空主人列表不授权任何人。' })),
         { field: 'replyWindowSeconds', label: '被动回复窗口（秒）', component: 'InputNumber', componentProps: { min: 1, max: 300 } },
         { field: 'c2cReplyWindowSeconds', label: '单聊被动回复窗口（秒）', component: 'InputNumber', componentProps: { min: 1, max: 3600 } },
@@ -31,11 +32,13 @@ export function createGuobaSupport({ store, reload = async () => {} }) {
       async getConfigData() {
         const data = await store.publicData();
         for (const field of listFields) data[field] = data[field].join('\n');
+        data.userIdMappings = JSON.stringify(data.userIdMappings, null, 2);
         return data;
       },
       async setConfigData(input, { Result }) {
         try {
           const patch = { ...input };
+          if (typeof patch.userIdMappings === 'string') patch.userIdMappings = patch.userIdMappings.trim() ? JSON.parse(patch.userIdMappings) : {};
           for (const field of listFields) {
             if (typeof patch[field] === 'string') patch[field] = patch[field].split(/\r?\n/).map(value => value.trim()).filter(Boolean);
           }

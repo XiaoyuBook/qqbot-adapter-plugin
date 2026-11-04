@@ -48,7 +48,8 @@ export class EventMapper {
     if (this.now() - createdAt > (scope === 'c2c' ? this.config.c2cReplyWindowSeconds : this.config.replyWindowSeconds) * 1000) return false;
     const key = JSON.stringify([this.config.appId, scope, target, d.id]);
     if (!this.dedup.claim(key)) return false;
-    const userId = identity(this.config.appId, scope === 'group' ? 'group-user' : 'c2c-user', openid);
+    const principalId = identity(this.config.appId, scope === 'group' ? 'group-user' : 'c2c-user', openid);
+    const userId = this.registry.userId(scope === 'group' ? 'group-user' : 'c2c-user', openid);
     const groupId = scope === 'group' ? identity(this.config.appId, 'group', target) : undefined;
     let content = d.content || '';
     if (scope === 'group') {
@@ -70,14 +71,14 @@ export class EventMapper {
       message_id: d.id, time: Math.floor(timestamp / 1000), raw_message: content,
       sender, message: [], adapter: 'QQBot',
       isGroup: scope === 'group', isPrivate: scope === 'c2c', atBot,
-      qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment }
+      qqbot: { appId: this.config.appId, scope, principalId, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment }
     };
     if (atBot) event.message.push({ type: 'at', qq: this.registry.id, text: 'QQ 官方机器人' });
     if (scope === 'group' && Array.isArray(d.mentions)) {
       if (d.mentions.length > 100) throw new AdapterError('EVENT_INVALID');
       for (const mention of d.mentions) {
         const id = mention?.member_openid ?? mention?.id;
-        if (validOpenid(id) && !mention.bot) event.message.push({ type: 'at', qq: identity(this.config.appId, 'group-user', id), text: typeof mention.username === 'string' ? mention.username.slice(0, 200) : '' });
+        if (validOpenid(id) && !mention.bot) event.message.push({ type: 'at', qq: this.registry.userId('group-user', id), text: typeof mention.username === 'string' ? mention.username.slice(0, 200) : '' });
       }
     }
     if (content) event.message.push({ type: 'text', text: content });
@@ -137,7 +138,7 @@ export class EventMapper {
     if (!this.dedup.claim(JSON.stringify([this.config.appId, 'interaction', d.id]))) return false;
     if (allowed.length && !allowed.includes(target)) { await this.api.request('PUT', `/interactions/${encodeURIComponent(d.id)}`, { code: 4 }); return false; }
     await this.api.request('PUT', `/interactions/${encodeURIComponent(d.id)}`, { code: 0 });
-    const userId = identity(this.config.appId, scope === 'group' ? 'group-user' : 'c2c-user', openid);
+    const userId = this.registry.userId(scope === 'group' ? 'group-user' : 'c2c-user', openid);
     const groupId = scope === 'group' ? identity(this.config.appId, 'group', target) : undefined;
     const resolved = d.data?.resolved ?? {};
     const event = { bot: this.registry.account, self_id: this.registry.id, post_type: 'notice', notice_type: 'qqbot', sub_type: 'button', user_id: userId, ...(groupId ? { group_id: groupId } : {}), time: Math.floor(timestamp / 1000), isGroup: scope === 'group', isPrivate: scope === 'c2c', adapter: 'QQBot', sender: { user_id: userId, nickname: 'QQBot 用户', role: 'member' }, qqbot: { appId: this.config.appId, scope, userOpenid: openid, ...(groupId ? { groupOpenid: target } : {}), interactionId: d.id, eventId: typeof payload.id === 'string' ? payload.id : d.id, buttonId: typeof resolved.button_id === 'string' ? resolved.button_id.slice(0, 256) : '', buttonData: typeof resolved.button_data === 'string' ? resolved.button_data.slice(0, 4096) : '', acknowledged: true, compatibility: [], lastError: null, segment: richSegment } };
@@ -159,7 +160,7 @@ export class EventMapper {
     const target = d.group_openid, openid = d.member_openid ?? d.op_member_openid;
     if (!validOpenid(openid)) throw new AdapterError('EVENT_INVALID');
     if (this.config.allowedGroupOpenids.length && !this.config.allowedGroupOpenids.includes(target)) return false;
-    const groupId = identity(this.config.appId, 'group', target), userId = identity(this.config.appId, 'group-user', openid);
+    const groupId = identity(this.config.appId, 'group', target), userId = this.registry.userId('group-user', openid);
     const timestamp = typeof d.timestamp === 'number' ? d.timestamp * 1000 : Date.parse(d.apply_at);
     if (!Number.isFinite(timestamp) || timestamp > this.now() + 60000 || this.now() - timestamp > 300000) return false;
     if (!this.dedup.claim(JSON.stringify([this.config.appId, payload.t, target, payload.id ?? d.join_request_id ?? `${openid}:${timestamp}`]))) return false;

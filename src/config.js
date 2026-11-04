@@ -21,6 +21,16 @@ export function validateConfig(value) {
     if (!Array.isArray(cfg[key]) || cfg[key].length > 1000 || !cfg[key].every(validOpenid)) throw new AdapterError('CONFIG_INVALID');
     cfg[key] = [...new Set(cfg[key])];
   }
+  if (!cfg.userIdMappings || typeof cfg.userIdMappings !== 'object' || Array.isArray(cfg.userIdMappings) || Object.keys(cfg.userIdMappings).length > 1000) throw new AdapterError('CONFIG_INVALID');
+  const targets = new Set();
+  for (const [principal, qq] of Object.entries(cfg.userIdMappings)) {
+    const match = /^qqbot:(\d{1,32}):(group-user|c2c-user):[A-Za-z0-9_-]{1,128}$/.exec(principal);
+    if (!match || typeof qq !== 'string' || !/^[1-9]\d{4,11}$/.test(qq)) throw new AdapterError('CONFIG_INVALID');
+    const target = `${match[1]}:${match[2]}:${qq}`;
+    if (targets.has(target)) throw new AdapterError('CONFIG_INVALID');
+    targets.add(target);
+  }
+  cfg.userIdMappings = { ...cfg.userIdMappings };
   for (const [key, [min, max]] of Object.entries(ranges)) {
     if (!Number.isInteger(cfg[key]) || cfg[key] < min || cfg[key] > max) throw new AdapterError('CONFIG_INVALID');
   }

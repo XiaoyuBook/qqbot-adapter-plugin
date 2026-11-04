@@ -26,6 +26,7 @@
     "hostPath": "plugins/xiaoyao-cvs-plugin",
     "files": {
       "apps/mhyTopUpLogin.js": "156e88e8c1ac86b1ebbc04664c584d94f23679ecef9eb345f37c014a3a2cad99",
+      "apps/user.js": "391aec44ef46f34c42d7085581b063a83061f0bfe0882cfd035ff859857b5ced",
       "model/mhyTopUpLogin.js": "fe87c3525b2647a95d0bc865851d371cbabce6c877fa2aa5ee8e2b509075775a",
       "components/Common.js": "8bc2e18c2a08d7bd089bfa2d9355bef702dbe2a79be8271ab279d16f966b4cda",
       "model/mys/utils.js": "8dd7d184d5373c44d36a603db208bac0adda94f3fe317f86d14f6dc55a35c9cd",

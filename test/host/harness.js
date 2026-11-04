@@ -25,7 +25,7 @@ export async function source(name, file) {
   return value.toString('utf8');
 }
 
-export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
+export async function harness(t, { cfgPatch = {}, adapterConfig = {}, userFactory } = {}) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'qqbot-host-'));
   t.after(() => fs.rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   const bot = new Client({ log_level: 'off', data_dir: temp });
@@ -36,7 +36,7 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {} } = {}) {
   const other = { disableGuildMsg: false, blackQQ: [], whiteQQ: [], blackGroup: [], whiteGroup: [] };
   const cfg = { bot: { sendmsg_error: false, serial_load: false, skip_login: true }, masterQQ: [10001], getGroup: () => groupCfg, getOther: () => other, ...cfgPatch };
   const userIds = [];
-  const noteUser = { async create(e) { userIds.push(e.user_id); return undefined; } };
+  const noteUser = { async create(e) { userIds.push(e.user_id); return userFactory ? userFactory(e) : undefined; } };
   const handler = { has: () => false, call: () => {}, callAll: () => {}, add: () => {} };
   const context = vm.createContext({ Bot: bot, logger, redis, Buffer, segment, process: { platform: process.platform, cwd: process.cwd.bind(process) }, console, setTimeout, clearTimeout, setInterval, clearInterval });
   context.global = context;

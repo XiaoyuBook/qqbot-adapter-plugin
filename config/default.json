@@ -8,6 +8,7 @@
   "receiveGroupNotices": false,
   "allowProactive": false,
   "mentionBeforeImage": true,
+  "userIdMappings": {},
   "masterGroupOpenids": [],
   "masterC2COpenids": [],
   "allowedGroupOpenids": [],
