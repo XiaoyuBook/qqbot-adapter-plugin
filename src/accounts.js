@@ -1,5 +1,5 @@
 import { accountId, identity, UserIdentities } from './identity.js';
-import { AdapterError, unsupported, logFailure, safeError } from './errors.js';
+import { AdapterError, logFailure, safeError } from './errors.js';
 import { makeForwardMsg } from './forward.js';
 import { validOpenid } from './config.js';
 import { eventContext } from './context.js';
@@ -14,15 +14,13 @@ import { acquireSegmentBridge } from './segment.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const owners = new WeakMap();
-const unsupportedMethods = ['getChatHistory', 'recallMsg', 'getMemberMap', 'getMemberList', 'muteMember', 'muteAll', 'kickMember', 'setCard', 'setName', 'setAdmin', 'pokeMember', 'sendFile', 'uploadFile', 'thumbUp', 'getSimpleInfo', 'getFileUrl', 'mute', 'kick', 'poke', 'quit', 'setTitle', 'renew'];
-
-export function contact(info, sendMsg = () => { throw new AdapterError('PASSIVE_ONLY'); }, rejectUnsupported = unsupported) {
-  // Optional avatar probes must stay absent so plugins can use their own fallback.
+export function contact(info, sendMsg = () => { throw new AdapterError('PASSIVE_ONLY'); }) {
+  // Unsupported optional methods must stay absent so capability probes can
+  // choose a fallback; concrete contacts install their implemented methods.
   const result = { info: { ...info }, sendMsg, makeForwardMsg };
   for (const key of new Set([...Object.keys(info), 'nickname', 'card', 'role', 'group_name', 'member_count'])) {
     Object.defineProperty(result, key, { enumerable: true, configurable: true, get: () => result.info[key], set: value => { result.info[key] = value; } });
   }
-  for (const name of unsupportedMethods) result[name] = rejectUnsupported;
   return result;
 }
 
@@ -44,20 +42,20 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.7' },
+      version: { id: 'qqbot-adapter-plugin', version: '0.2.8' },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),
       pickUser: id => this.#pick(id, 'c2c-user', this.account.fl),
       pickGroup: id => this.#pick(id, 'group', this.account.gl),
-      getFriendList: unsupported, getGroupList: unsupported,
-      sendPrivateMsg: () => { throw new AdapterError('PASSIVE_ONLY'); },
-      sendGroupMsg: () => { throw new AdapterError('PASSIVE_ONLY'); },
+      // These are observed contacts, not an enumeration of every platform group.
+      getFriendList: async () => new Map(this.account.fl), getGroupList: async () => new Map(this.account.gl),
+      getFriendMap: () => new Map(this.account.fl), getGroupMap: () => new Map(this.account.gl),
       makeForwardMsg, segment: richSegment,
       uploadMarkdownImage: async (file, name) => { this.checkOnline(); return this.imageReplies.persistent(await prepareMedia('image', file, { ...this.config, maxImageBytes: Math.min(this.config.maxImageBytes, 10 * 1024 * 1024) }, name)); },
       getMarkdownImages: async (cursor = '') => { this.checkOnline(); boundedString(cursor, 2048, true); return this.api.request('GET', `/v2/media-images${cursor ? `?${new URLSearchParams({ cursor })}` : ''}`); },
       deleteMarkdownImage: async id => { this.checkOnline(); boundedString(id, 256); await this.api.request('DELETE', `/v2/media-images/${encodeURIComponent(id)}/delete`); return true; },
-      deleteMsg: id => this.deleteMsg(id), getMsg: unsupported,
+      deleteMsg: id => this.deleteMsg(id),
       getGroupInfo: id => this.group(this.openid(id, 'group')).getInfo(),
       getGroupMemberInfo: (groupId, userId) => this.group(this.openid(groupId, 'group')).getMemberInfo(userId),
       getGroupMemberList: groupId => this.group(this.openid(groupId, 'group')).getMemberMap(),
@@ -65,7 +63,6 @@ export class AccountRegistry {
       setGroupBan: (groupId, userId, seconds) => this.group(this.openid(groupId, 'group')).muteMember(userId, seconds),
       setGroupKick: (groupId, userId, block = false, reason = '') => this.group(this.openid(groupId, 'group')).kickMember(userId, reason, block),
       setGroupWholeBan: () => { throw new AdapterError('GROUP_WHOLE_MUTE_UNSUPPORTED'); },
-      setGroupAdmin: unsupported, setGroupCard: unsupported, setGroupName: unsupported, setGroupSpecialTitle: unsupported,
       getSystemMsg: () => this.groupRequests.list(),
       setGroupAddRequest: (...args) => this.groupRequests.approve(...args),
       getJoinApprovalStrategies: (...args) => this.approvalStrategies.list(...args),
@@ -171,9 +168,11 @@ export class AccountRegistry {
     this.checkOnline(); this.checkTarget(scope, target); const prepared = await prepareMedia(kind, file, this.config, name);
     return uploadMedia(this.api, scope, target, prepared, () => this.checkOnline());
   }
-  contact(scope, target, info, reply, rejectUnsupported = unsupported) {
+  contact(scope, target, info, reply) {
     const send = reply ? (...args) => reply.send(...args) : (...args) => this.send(scope, target, ...args);
-    const result = contact(info, send, rejectUnsupported);
+    const result = contact(info, send);
+    result.getInfo = async () => ({ ...result.info });
+    if (scope === 'c2c') result.getSimpleInfo = result.getInfo;
     result.segment = richSegment;
     result.recallMsg = id => this.recall(scope, target, id, error => { if (reply) reply.onError({ code: error.code, message: error.message }); else { const current = this.context(scope, target); if (current) current.event.qqbot.lastError = { code: error.code, message: error.message }; } });
     result.sendFile = (file, name) => send({ type: 'file', file, name });
@@ -195,7 +194,9 @@ export class AccountRegistry {
         id = this.userId('group-user', group.memberId(id));
         if (memberContacts.has(id)) return memberContacts.get(id);
         const cached = this.account.gml.get(group.id)?.get(id) || { user_id: id, nickname: 'QQBot 用户', card: 'QQBot 用户', role: 'member' };
-        const member = contact(cached, undefined, rejectUnsupported); member.info = cached; member._info = member.info;
+        cached.group_id = group.id;
+        const member = contact(cached); member.info = cached; member._info = member.info;
+        member.group = result;
         Object.defineProperties(member, {
           is_admin: { enumerable: true, get: () => ['admin', 'owner'].includes(member.info.role) },
           is_owner: { enumerable: true, get: () => member.info.role === 'owner' }
@@ -245,7 +246,7 @@ export class AccountRegistry {
   }
   observe(list, id, info) {
     if (!list.has(id) && list.size >= 1000) list.delete(list.keys().next().value);
-    list.set(id, info);
+    list.set(id, { ...info, uin: this.id, ...(list === this.account.gl ? { group_name: info.group_name ?? info.name } : {}) });
   }
   dispose() {
     this.abort.abort();

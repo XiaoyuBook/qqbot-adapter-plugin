@@ -25,7 +25,7 @@ const messages = Object.freeze({
   FORWARD_INVALID: '合并内容格式不支持；可整理文字、图片和命令按钮说明。',
   FORWARD_LIMIT: '合并内容过长或层级过多，请减少条目后重新触发。',
   UNSUPPORTED_MESSAGE: '消息格式无效；支持文本、图片、语音、视频、文件、Markdown、按钮键盘、图文卡片以及适配器构建的合并内容。',
-  UNSUPPORTED_OPTIONS: '回复选项无效；支持消息索引引用、at、button/keyboard 和 0–120 秒定时撤回。',
+  UNSUPPORTED_OPTIONS: '回复选项无效；支持消息索引引用、at、button/keyboard、receipt 和 0–120 秒定时撤回。',
   UNSUPPORTED_API: '当前 QQ 群聊/单聊接口没有提供此调用，或旧插件使用了尚未适配的调用方式。',
   GROUP_WHOLE_MUTE_UNSUPPORTED: 'QQ 官方接口当前仅提供成员禁言写入，没有全员禁言写入字段；不能用批量禁言冒充全员禁言。',
   IMAGE_INVALID: '图片来源无效；支持 HTTPS URL、Buffer、base64:// 或本地普通图片文件。',

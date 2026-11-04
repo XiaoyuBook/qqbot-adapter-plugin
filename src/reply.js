@@ -6,6 +6,7 @@ import { isForwardMessage, forwardContent } from './forward.js';
 import { prepareMedia, uploadMedia, markdownImageDimensions } from './media.js';
 import { markdown, keyboard, card, keyboardText, isLegacyButton } from './rich.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { sendReceipt } from './receipts.js';
 
 const optionContext = new AsyncLocalStorage();
 const escapeMarkdown = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#+.!~|])/g, '\\$1');
@@ -131,10 +132,11 @@ async function messageParts(message, config, context) {
 
 function validateOptions(quote, extra) {
   if (quote !== undefined && quote !== null && typeof quote !== 'boolean' && (!quote || typeof quote !== 'object' || Array.isArray(quote) || !Object.keys(quote).some(key => ['message_id', 'id', 'ref_idx'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
-  if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.keys(extra).some(key => !['recallMsg', 'at', 'button', 'keyboard'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.keys(extra).some(key => !['recallMsg', 'at', 'button', 'keyboard', 'receipt'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.recallMsg !== undefined && (!Number.isInteger(extra.recallMsg) || extra.recallMsg < 0 || extra.recallMsg > 120)) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.at !== undefined && typeof extra.at !== 'boolean' && typeof extra.at !== 'string') throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.button !== undefined && extra?.keyboard !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra?.receipt !== undefined && typeof extra.receipt !== 'boolean') throw new AdapterError('UNSUPPORTED_OPTIONS');
 }
 
 export class PassiveReply {
@@ -146,6 +148,7 @@ export class PassiveReply {
     this.queue = Promise.resolve();
     this.feedbackSent = false;
     this.warnings = new Set();
+    this.lastReceipt = null;
   }
   warn(code) { this.warnings.add(code); this.onCompatibility(code); }
   #check() {
@@ -188,8 +191,9 @@ export class PassiveReply {
     this.queue = pending.catch(() => {});
     return pending;
   }
-  async #failure(error, feedback = true) {
+  async #failure(error, feedback = true, { sent = [], total = 0, stage = 'validation', detailed = false } = {}) {
     const safe = safeError(error);
+    this.lastReceipt = sendReceipt(sent, { total, error: safe, stage, warnings: [...this.warnings] });
     this.onError({ code: safe.code, message: safe.message, ...(safe.status ? { status: safe.status } : {}), ...(safe.platformCode ? { platformCode: safe.platformCode } : {}) });
     logFailure(this.logger, 'reply', safe);
     // Only local validation errors get one passive explanation. Never resend on a
@@ -199,9 +203,11 @@ export class PassiveReply {
       try { await this.#post({ msg_type: 0, content: `[QQBot] ${safe.message}` }); }
       catch (feedbackError) { logFailure(this.logger, 'feedback', feedbackError); }
     }
-    return false;
+    // Preserve the historical false result when nothing was delivered. A
+    // partial result always retains the successful IDs for recall/accounting.
+    return detailed || sent.length ? this.lastReceipt : false;
   }
-  fail(error, feedback = true) { return this.#enqueue(() => this.#failure(error, feedback)); }
+  fail(error, feedback = true, detailed = false) { return this.#enqueue(() => { this.warnings.clear(); return this.#failure(error, feedback, { detailed }); }); }
   reference(quote) {
     if (!quote) return undefined;
     let id;
@@ -219,6 +225,9 @@ export class PassiveReply {
   send(message, quote = false, extra) {
     extra ??= optionContext.getStore()?.reply === this ? optionContext.getStore().extra : undefined;
     return this.#enqueue(async () => {
+      const sent = [];
+      let total = 0, stage = 'validation';
+      this.warnings.clear();
       try {
         this.#check();
         validateOptions(quote, extra);
@@ -226,11 +235,12 @@ export class PassiveReply {
         const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, warn: code => this.warn(code), extra, quote,
           imageMention: this.config.mentionBeforeImage && this.scope === 'group' && !this.proactive && this.senderId && extra?.at !== false };
         const parts = await messageParts(message, this.config, context);
+        total = parts.length;
         const reference = this.reference(context.quote);
         if (this.sequence + parts.length > this.limit) throw new AdapterError('REPLY_LIMIT');
-        const sent = [];
-        const post = body => this.#post(reference ? { ...body, message_reference: reference } : body, extra?.recallMsg);
+        const post = body => { stage = 'message'; return this.#post(reference ? { ...body, message_reference: reference } : body, extra?.recallMsg); };
         for (const part of parts) {
+          stage = 'validation';
           let body;
           if (part.media) {
             this.#check();
@@ -239,6 +249,7 @@ export class PassiveReply {
             if (dimensions) {
               const id = this.registry.openid(this.senderId, 'group-user');
               const caption = escapeMarkdown((part.text || '').trim());
+              stage = 'upload';
               sent.push(await this.registry.imageReplies.send(part.media, async url => {
                 this.#check();
                 const image = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
@@ -247,14 +258,16 @@ export class PassiveReply {
               continue;
             }
             if (part.mentionFirst) this.warn('image_mention_layout_unavailable');
+            stage = 'upload';
             const upload = await uploadMedia(this.api, this.scope, this.target, part.media, () => this.#check());
             if (typeof upload.file_info !== 'string' || !upload.file_info) throw new AdapterError('API_RESPONSE');
             body = { msg_type: 7, content: part.text || ' ', media: { file_info: upload.file_info } };
           } else body = part.body ?? { msg_type: 0, content: part.text };
           sent.push(await post(body));
         }
-        return { ...sent.at(-1), message_ids: sent.map(item => item.message_id), ...(this.warnings.size ? { warnings: [...this.warnings] } : {}) };
-      } catch (error) { return this.#failure(error); }
+        this.lastReceipt = sendReceipt(sent, { total, warnings: [...this.warnings] });
+        return this.lastReceipt;
+      } catch (error) { return this.#failure(error, true, { sent, total, stage, detailed: extra?.receipt === true }); }
     });
   }
 }
@@ -262,9 +275,10 @@ export class PassiveReply {
 // Miao wraps e.reply and drops its third argument. Check options before that
 // wrapper runs, so buttons/recall/@ options cannot silently turn into success.
 export function installReply(event, reply) {
+  if (event.qqbot) Object.defineProperty(event.qqbot, 'lastReceipt', { enumerable: true, get: () => reply.lastReceipt });
   const guard = fn => (message, quote = false, extra) => {
     try { validateOptions(quote, extra); }
-    catch (error) { return reply.fail(error); }
+    catch (error) { return reply.fail(error, true, extra?.receipt === true); }
     const inherited = optionContext.getStore();
     const effective = extra ?? (inherited?.reply === reply ? inherited.extra : undefined);
     // The host wrapper drops the third argument and may schedule its own recall.

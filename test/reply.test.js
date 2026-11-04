@@ -83,9 +83,10 @@ test('missing upload result or platform failure never claims image success or au
   f.api.request = async () => { throw new AdapterError('API_REJECTED', { status: 403, platformCode: 123 }); };
   assert.equal(await e.reply('text'), false); assert.equal(e.qqbot.lastError.status, 403); assert.equal(e.qqbot.lastError.platformCode, 123);
 });
-test('unsupported contact APIs raise explicit safe errors', async () => {
+test('optional unsupported contact APIs stay absent; required rejected operations stay explicit', async () => {
   const f = fixture(); const e = await f.mapper.dispatch(payload());
   assert.equal(e.getAvatarUrl, undefined); assert.equal(e.member.getAvatarUrl, undefined);
   assert.throws(() => e.group.muteAll(), { code: 'GROUP_WHOLE_MUTE_UNSUPPORTED' });
-  for (const fn of [() => e.member.getChatHistory(), () => e.bot.sendGroupMsg(e.group_id, 'proactive')]) assert.throws(fn, error => ['UNSUPPORTED_API', 'PASSIVE_ONLY'].includes(error.code));
+  for (const object of [e.group, e.member]) for (const name of ['getChatHistory', 'getAvatarUrl', 'getFileUrl', 'setCard', 'pokeMember']) assert.equal(object[name], undefined);
+  assert.throws(() => e.bot.sendGroupMsg(e.group_id, 'proactive'), { code: 'PASSIVE_ONLY' });
 });

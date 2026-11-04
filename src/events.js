@@ -118,21 +118,16 @@ export class EventMapper {
     this.registry.rememberMessage(scope, target, d.id, { own: false, at: timestamp, ref_idx: referenceId });
     const reply = new PassiveReply({ registry: this.registry, api: this.api, config: this.config, scope, target, senderId: userId, messageId: d.id, referenceId, createdAt, online: () => this.registry.online, logger: this.logger, now: this.now, onError: error => { event.qqbot.lastError = error; }, onCompatibility: code => { if (!event.qqbot.compatibility.includes(code)) event.qqbot.compatibility.push(code); } });
     installReply(event, reply);
-    const rejectUnsupported = () => {
-      const error = new AdapterError('UNSUPPORTED_API');
-      void reply.fail(error);
-      throw error;
-    };
     const userInfo = { user_id: userId, nickname: sender.nickname, card: sender.card, role: sender.role };
     if (scope === 'group') {
       this.registry.observeMember(groupId, userId, { ...userInfo, is_admin: ['admin', 'owner'].includes(sender.role), is_owner: sender.role === 'owner' });
-      const group = this.registry.contact(scope, target, this.registry.account.gl.get(groupId) ?? { group_id: groupId, name: 'QQBot 群', group_name: 'QQBot 群', mute_left: 0 }, reply, rejectUnsupported);
+      const group = this.registry.contact(scope, target, this.registry.account.gl.get(groupId) ?? { group_id: groupId, name: 'QQBot 群', group_name: 'QQBot 群', mute_left: 0 }, reply);
       const member = group.pickMember(userId);
       event.group = group;
       event.member = member;
       this.registry.observe(this.registry.account.gl, groupId, group.info);
     } else {
-      event.friend = this.registry.contact(scope, target, userInfo, reply, rejectUnsupported);
+      event.friend = this.registry.contact(scope, target, userInfo, reply);
       this.registry.observe(this.registry.account.fl, userId, userInfo);
     }
     if (!content && !event.message.some(part => ['image', 'video', 'record', 'file'].includes(part.type)) && event.qqbot.unsupportedAttachments.length) {
