@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { AdapterError, logFailure, safeError } from './errors.js';
 import { isForwardMessage, forwardContent } from './forward.js';
-import { prepareMedia, uploadMedia } from './media.js';
+import { prepareMedia, uploadMedia, markdownImageDimensions } from './media.js';
 import { markdown, keyboard, card, keyboardText, isLegacyButton } from './rich.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -234,13 +234,15 @@ export class PassiveReply {
           let body;
           if (part.media) {
             this.#check();
-            if (part.mentionFirst && this.registry?.imageReplies && (part.media.url || (part.media.size <= 10 * 1024 * 1024 && ['png', 'jpg', 'gif', 'webp'].includes(part.media.extension)))) {
+            const dimensions = part.mentionFirst && this.registry?.imageReplies && ['png', 'jpg', 'gif', 'webp'].includes(part.media.extension)
+              ? await markdownImageDimensions(part.media) : undefined;
+            if (dimensions) {
               const id = this.registry.openid(this.senderId, 'group-user');
               const caption = escapeMarkdown((part.text || '').trim());
               sent.push(await this.registry.imageReplies.send(part.media, async url => {
                 this.#check();
                 const image = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
-                return post({ msg_type: 2, markdown: { content: `<qqbot-at-user id="${id}" />\n${caption ? caption + '\n' : ''}![图片](${image})`, force_verify_image_resource: true } });
+                return post({ msg_type: 2, markdown: { content: `<qqbot-at-user id="${id}" />\n${caption ? caption + '\n' : ''}![图片 #${dimensions.width}px #${dimensions.height}px](${image})`, force_verify_image_resource: true } });
               }));
               continue;
             }

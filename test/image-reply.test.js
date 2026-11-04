@@ -20,7 +20,7 @@ test('a group image reply is one verified Markdown message with mention before i
   const result = await e.reply({ type: 'image', file: png });
   assert.ok(result.message_id); const sent = messages(f);
   assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 2);
-  assert.match(sent[0].body.markdown.content, /^<qqbot-at-user id="12345678901234567890123456789012" \/>\n!\[图片\]\(qqbot-media:\/\/image\/v1\//);
+  assert.match(sent[0].body.markdown.content, /^<qqbot-at-user id="12345678901234567890123456789012" \/>\n!\[图片 #1px #1px\]\(qqbot-media:\/\/image\/v1\//);
   assert.equal(sent[0].body.markdown.force_verify_image_resource, true);
   assert.equal(sent[0].body.msg_id, 'trigger-id'); assert.equal(sent[0].body.msg_seq, 1);
   assert.equal(sent[0].body.media, undefined); assert.equal(f.api.uploads[0].contentType, 'image/png');
@@ -34,18 +34,20 @@ test('caption, quote and recall stay on the same ordered image message', async t
   const e = await f.mapper.dispatch(payload('group', { message_scene: { ext: ['msg_idx=REFIDX_image=='] } }));
   const result = await e.reply([{ type: 'at', qq: e.user_id }, '说明 *文字*', { type: 'image', file: png }], true, { recallMsg: 10 });
   assert.ok(result.message_id); const sent = messages(f);
-  assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 2); assert.match(sent[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n说明 \\\*文字\\\*\n!\[图片\]/);
+  assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 2); assert.match(sent[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n说明 \\\*文字\\\*\n!\[图片 #1px #1px\]/);
   assert.equal(sent[0].body.message_reference.message_id, 'REFIDX_image==');
   await timers.tick(10000);
   assert.equal(f.api.calls.filter(call => call.method === 'DELETE' && call.route.includes('/messages/')).length, 1);
 });
 
-test('public image URL uses the same ordered Markdown without local upload or extra @ bubble', async t => {
+test('a public image URL without dimensions uses native media without guessing or downloading it', async t => {
   const f = enabled(); t.after(() => f.registry.dispose()); const e = await f.mapper.dispatch(payload());
-  await e.reply({ type: 'image', file: 'https://example.test/chart(1).png' });
-  const sent = messages(f); assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 2);
-  assert.match(sent[0].body.markdown.content, /!\[图片\]\(https:\/\/example.test\/chart%281%29.png\)$/);
-  assert.equal(f.api.calls.length, 1); assert.equal(f.api.uploads.length, 0);
+  const result = await e.reply({ type: 'image', file: 'https://example.test/chart(1).png' });
+  const sent = messages(f); assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 7);
+  assert.equal(sent[0].body.markdown, undefined);
+  assert.equal(f.api.calls[0].body.url, 'https://example.test/chart(1).png');
+  assert.equal(f.api.calls.length, 2); assert.equal(f.api.uploads.length, 0);
+  assert.ok(result.warnings.includes('image_mention_layout_unavailable'));
 });
 
 test('private images, explicit opt-out and proactive images retain native media behavior', async t => {
@@ -96,7 +98,7 @@ test('actual HTTP flow sends one ordered image message, accepts string inventory
   const e = await f.mapper.dispatch(payload()); assert.ok((await e.reply(png)).message_id);
   const sent = requests.filter(request => request.route.endsWith('/messages'));
   assert.equal(sent.length, 1); assert.equal(sent[0].body.msg_type, 2);
-  assert.match(sent[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片\]\(qqbot-media:\/\/image\/v1\/WIRE_ref\)$/);
+  assert.match(sent[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片 #1px #1px\]\(qqbot-media:\/\/image\/v1\/WIRE_ref\)$/);
   const upload = requests.find(request => request.method === 'PUT');
   assert.deepEqual(upload.bytes, png); assert.equal(upload.mime, 'image/png'); assert.equal(upload.auth, undefined);
   assert.equal(requests.filter(request => request.method === 'DELETE').length, 1);

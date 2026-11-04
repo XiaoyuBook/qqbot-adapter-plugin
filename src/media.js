@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
+import { imageSize } from 'image-size';
 import { AdapterError } from './errors.js';
 
 const directLimit = 4 * 1024 * 1024;
@@ -92,6 +93,22 @@ export async function prepareMedia(kind, value, config, name) {
     if (opened.stat.ino !== stat.ino || opened.stat.size !== stat.size || opened.stat.mtimeMs !== stat.mtimeMs) { await opened.handle.close(); throw new AdapterError('MEDIA_INVALID'); }
     return { async read(offset, length) { const buffer = Buffer.alloc(length); const result = await opened.handle.read(buffer, 0, length, offset); if (result.bytesRead !== length) throw new AdapterError('MEDIA_INVALID'); return buffer; }, close: () => opened.handle.close() };
   } };
+}
+
+export async function markdownImageDimensions(prepared) {
+  // Unknown URL dimensions use native media instead of guessing a Markdown box.
+  if (prepared.url || prepared.fileType !== 1 || prepared.size > 10 * 1024 * 1024) return undefined;
+  const reader = await prepared.open();
+  let bytes;
+  try { bytes = await reader.read(0, prepared.size); }
+  finally { await reader.close(); }
+  try {
+    // Give the parser an exact backing store, including for pooled Buffer slices.
+    let { width, height, orientation } = imageSize(Uint8Array.from(bytes));
+    if (orientation >= 5 && orientation <= 8) [width, height] = [height, width];
+    if ([width, height].every(value => Number.isSafeInteger(value) && value > 0)) return { width, height };
+  } catch { /* A readable image without usable dimensions can still use native media. */ }
+  return undefined;
 }
 
 export async function uploadMedia(api, scope, target, prepared, check = () => {}) {

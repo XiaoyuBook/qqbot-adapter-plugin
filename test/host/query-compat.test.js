@@ -58,7 +58,7 @@ for (const scope of ['group', 'c2c']) test(`real ${scope} exploration uses the g
   assert.equal(result.rendered[0].data.avatar, 'https://example.test/game-avatar.png');
   assert.equal(result.messages.length, 1, 'a completed query needs only its result image');
   assert.equal(result.messages[0].body.msg_type, scope === 'group' ? 2 : 7); assert.equal(result.event.qqbot.lastError, null);
-  if (scope === 'group') assert.match(result.messages[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片\]/);
+  if (scope === 'group') assert.match(result.messages[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片 #1px #1px\]/);
   assert.equal(f.logger.records.some(line => /UNSUPPORTED_API/.test(line)), false);
 });
 
@@ -73,6 +73,6 @@ for (const scope of ['group', 'c2c']) test(`real ${scope} ledger statistics omit
   assert.equal(result.rendered.length, 1); assert.match(result.rendered[0].template, /ledger-count/);
   assert.equal(result.messages.length, 1, 'do not append the records/statistics navigation to a completed chart');
   assert.equal(result.messages[0].body.msg_type, scope === 'group' ? 2 : 7); assert.equal(result.messages[0].body.keyboard, undefined);
-  if (scope === 'group') assert.match(result.messages[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片\]/);
+  if (scope === 'group') assert.match(result.messages[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片 #1px #1px\]/);
   assert.equal(result.event.qqbot.lastError, null);
 });
