@@ -35,6 +35,35 @@ test('real Miao permission filter accepts local OpenID grant, denies self-claim 
   const denied = await f.mapper.dispatch(payload('c2c')); await f.flush(); assert.equal(events.length, 1); assert.equal(denied.isMaster, false);
   assert.match(f.api.calls[0].body.content, /只有主人/);
 });
+
+test('unmentioned group commands run once through the real Miao loader when group reception and host rules allow it', async t => {
+  const f = await harness(t, { adapterConfig: { receiveGroupMessages: true } });
+  f.groupCfg.onlyReplyAt = 0;
+  const events = await probe(f, { execute: e => e.reply('免 @ 指令已处理') });
+  const message = { ...payload('group', { id: 'no-mention-command' }), t: 'GROUP_MESSAGE_CREATE' };
+  const event = await f.mapper.dispatch(message); await f.flush();
+  assert.equal(events.length, 1); assert.equal(events[0].msg, '#测试');
+  assert.equal(event.atBot, false); assert.equal(event.message.some(item => item.type === 'at'), false);
+  assert.equal(f.api.calls.length, 1); assert.equal(f.api.calls[0].body.msg_id, 'no-mention-command');
+  await f.mapper.dispatch(message); await f.flush();
+  // Two platform event names for the same underlying message also stay deduplicated.
+  await f.mapper.dispatch({ ...message, t: 'GROUP_AT_MESSAGE_CREATE' }); await f.flush();
+  await f.mapper.dispatch({ ...message, d: { ...message.d, id: 'ordinary-chat', content: '今天下午好' } }); await f.flush();
+  assert.equal(events.length, 1); assert.equal(f.api.calls.length, 1);
+});
+
+test('unmentioned group reception never bypasses the host mention requirement or group allowlist', async t => {
+  const f = await harness(t, { adapterConfig: { receiveGroupMessages: true, allowedGroupOpenids: ['group-openid'] } });
+  const events = await probe(f);
+  const message = { ...payload('group', { id: 'host-denied' }), t: 'GROUP_MESSAGE_CREATE' };
+  await f.mapper.dispatch(message); await f.flush(); assert.equal(events.length, 0);
+  f.groupCfg.onlyReplyAt = 0;
+  assert.equal(await f.mapper.dispatch({ ...message, d: { ...message.d, id: 'allowlist-denied', group_openid: 'other-group' } }), false);
+  await f.flush(); assert.equal(events.length, 0);
+  // A distinct raw message avoids the host's 200 ms identical-text throttle.
+  const event = await f.mapper.dispatch({ ...message, d: { ...message.d, id: 'now-allowed', content: '#测试 ' } });
+  await f.flush(); assert.equal(events.length, 1); assert.equal(event.atBot, false); assert.equal(event.isMaster, false);
+});
 test('real Miao blacklist / whitelist and group-only-at filters work with namespaced IDs', async t => {
   const f = await harness(t); const events = await probe(f);
   f.other.blackGroup = ['qqbot:123456:group:group-openid']; await f.mapper.dispatch(payload()); await f.flush(); assert.equal(events.length, 0);
