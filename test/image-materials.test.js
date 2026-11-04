@@ -166,7 +166,8 @@ test('inventory traversal rejects repeated cursors, duplicate IDs and inconsiste
   ]) {
     const api = network({ pages }), replies = new ImageReplies(api);
     await assert.rejects(replies.send(await image(), async () => assert.fail('invalid cursor reached callback')), { code: 'API_RESPONSE' });
-    assert.ok(api.calls.length <= 100); assert.deepEqual(prepares(api), []); assert.deepEqual(deletes(api), []);
+    assert.ok(api.calls.filter(call => call.method === 'GET').length <= 100);
+    assert.equal(api.calls.some(call => call.route.endsWith('/complete')), false); assert.deepEqual(deletes(api), []);
   }
 });
 
@@ -175,6 +176,46 @@ test('complete cursor traversal accepts optional totals and all one hundred exis
   const api = network({ pages: [{ images: ids.slice(0, 50).map(image_id => ({ image_id })), next_cursor: 'next' }, { images: ids.slice(50).map(image_id => ({ image_id })) }], ids: [ids[99]] });
   assert.equal(await new ImageReplies(api).send(await image(), async () => 'sent'), 'sent');
   assert.deepEqual(deletes(api), []);
+});
+
+test('COS transfer overlaps the inventory read but complete and message wait for the protected gallery snapshot', async () => {
+  const ready = gate(), inventory = gate(), api = network({ pages: [{ images: [{ image_id: 'gallery' }], total: '1' }], ids: ['gallery'] });
+  const request = api.request.bind(api), upload = api.uploadPart.bind(api);
+  api.request = async (...args) => { if (args[0] === 'GET') await inventory.promise; return request(...args); };
+  api.uploadPart = async (...args) => { const result = await upload(...args); ready.resolve(); return result; };
+  const replies = new ImageReplies(api); let sent = 0;
+  const sending = replies.send(await image(), async () => { sent++; return 'sent'; });
+  await ready.promise; await settle();
+  assert.equal(prepares(api).length, 1); assert.equal(api.uploads.length, 1);
+  assert.equal(api.calls.some(call => call.route.endsWith('/complete')), false); assert.equal(sent, 0);
+  inventory.resolve(); assert.equal(await sending, 'sent'); assert.equal(sent, 1);
+  const listed = api.calls.findIndex(call => call.method === 'GET');
+  assert.ok(api.calls.findIndex(call => call.route.endsWith('/complete')) > listed);
+  assert.deepEqual(deletes(api), [], 'an existing gallery item remains protected after the overlap');
+});
+
+test('a late inventory failure after COS transfer prevents material creation, sending and deletion', async () => {
+  const ready = gate(), inventory = gate(), api = network({ pages: [{ images: null }] });
+  const request = api.request.bind(api), upload = api.uploadPart.bind(api);
+  api.request = async (...args) => { if (args[0] === 'GET') await inventory.promise; return request(...args); };
+  api.uploadPart = async (...args) => { const result = await upload(...args); ready.resolve(); return result; };
+  const replies = new ImageReplies(api);
+  const sending = replies.send(await image(), async () => assert.fail('failed inventory reached sender'));
+  const rejection = assert.rejects(sending, { code: 'API_RESPONSE' });
+  await ready.promise; inventory.resolve(); await rejection;
+  assert.equal(api.calls.some(call => call.route.endsWith('/complete')), false); assert.deepEqual(deletes(api), []);
+});
+
+test('closing while the inventory gate is pending stops complete even when COS transfer already finished', async () => {
+  const ready = gate(), inventory = gate(), api = network();
+  const request = api.request.bind(api), upload = api.uploadPart.bind(api);
+  api.request = async (...args) => { if (args[0] === 'GET') await inventory.promise; return request(...args); };
+  api.uploadPart = async (...args) => { const result = await upload(...args); ready.resolve(); return result; };
+  const replies = new ImageReplies(api);
+  const sending = replies.send(await image(), async () => assert.fail('closed pipeline reached sender'));
+  const rejection = assert.rejects(sending, { code: 'OFFLINE' });
+  await ready.promise; replies.close(); inventory.resolve(); await rejection;
+  assert.equal(api.calls.some(call => call.route.endsWith('/complete')), false); assert.deepEqual(deletes(api), []);
 });
 
 test('unsafe or oversized platform references never reach the sender or a persistent caller', async () => {

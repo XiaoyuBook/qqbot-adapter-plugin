@@ -109,13 +109,13 @@ export class ImageReplies {
     return ids;
   }
 
-  #upload(prepared) {
+  #upload(prepared, { beforeComplete, check = () => {} } = {}) {
     this.#check();
     // Closing during one request must stop the remaining upload stages.
     return uploadMarkdownImage({
-      request: (...args) => { this.#check(); return this.api.request(...args); },
-      uploadPart: (...args) => { this.#check(); return this.api.uploadPart(...args); }
-    }, prepared);
+      request: (...args) => { this.#check(); check(); return this.api.request(...args); },
+      uploadPart: (...args) => { this.#check(); check(); return this.api.uploadPart(...args); }
+    }, prepared, beforeComplete);
   }
 
   async send(prepared, callback) {
@@ -123,8 +123,15 @@ export class ImageReplies {
     if (prepared.url) return callback(mediaUrl(prepared.url));
     return this.#serial(async () => {
       this.#check();
-      const existing = await this.#inventory();
-      const image = await this.#upload({ ...prepared, fileName: `reply-${randomUUID()}.${prepared.extension}` });
+      let existing, inventoryError;
+      // Upload preparation and COS transfer do not create a gallery item. Run
+      // them alongside the inventory read, then gate complete on its success.
+      // Capture rejection immediately so a slow upload cannot leave it unhandled.
+      const inventory = this.#inventory().then(ids => { existing = ids; }, error => { inventoryError = error; });
+      const check = () => { if (inventoryError) throw inventoryError; };
+      const image = await this.#upload({ ...prepared, fileName: `reply-${randomUUID()}.${prepared.extension}` }, {
+        check, beforeComplete: async () => { await inventory; check(); }
+      });
       this.#check();
       if (!validId(image.image_id)) throw new AdapterError('API_RESPONSE');
       let state = this.#pending.get(image.image_id);

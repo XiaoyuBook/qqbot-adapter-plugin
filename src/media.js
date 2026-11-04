@@ -145,7 +145,7 @@ export async function uploadMedia(api, scope, target, prepared, check = () => {}
   } finally { await reader.close(); }
 }
 
-export async function uploadMarkdownImage(api, prepared) {
+export async function uploadMarkdownImage(api, prepared, beforeComplete = async () => {}) {
   if (prepared.url || prepared.size > 10 * 1024 * 1024 || !['png', 'jpg', 'gif', 'webp'].includes(prepared.extension)) throw new AdapterError('MEDIA_INVALID');
   const reader = await prepared.open();
   try {
@@ -156,6 +156,7 @@ export async function uploadMarkdownImage(api, prepared) {
     if (typeof upload.upload_id !== 'string' || !upload.upload_id || typeof upload.presigned_url !== 'string') throw new AdapterError('API_RESPONSE');
     const result = await api.uploadPart(upload.presigned_url, bytes, contentType);
     if (result?.etag && result.etag.toLowerCase() !== md5) throw new AdapterError('API_RESPONSE');
+    await beforeComplete();
     const image = await api.request('POST', '/v2/media-images/complete', { upload_id: upload.upload_id, md5 });
     if (typeof image.image_id !== 'string' || typeof image.url !== 'string' || !image.url.startsWith('qqbot-media://image/v1/')) throw new AdapterError('API_RESPONSE');
     return { image_id: image.image_id, url: image.url, ttl: image.ttl };
