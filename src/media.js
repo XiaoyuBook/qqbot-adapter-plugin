@@ -131,14 +131,22 @@ export async function uploadMedia(api, scope, target, prepared, check = () => {}
     const upload = await api.request('POST', route('upload_prepare'), { file_type: prepared.fileType, file_size: String(prepared.size), file_name: prepared.fileName, md5: md5.digest('hex'), sha1: sha1.digest('hex'), md5_10m: md5_10m.digest('hex') });
     const blockSize = Number(upload.block_size);
     if (typeof upload.upload_id !== 'string' || !upload.upload_id || upload.upload_id.length > 2048 || !Number.isInteger(blockSize) || blockSize < 1 || blockSize > 20 * 1024 * 1024 || !Array.isArray(upload.parts) || (upload.parts.length && upload.parts.length !== Math.ceil(prepared.size / blockSize)) || upload.parts.length > 1000) throw new AdapterError('API_RESPONSE');
+    if (upload.parts.some(part => !part || !Number.isInteger(part.index))) throw new AdapterError('API_RESPONSE');
     const parts = [...upload.parts].sort((a, b) => a.index - b.index);
-    for (const [index, part] of parts.entries()) {
+    // Provider responses use either zero-based or one-based part numbers. Byte
+    // offsets follow position; completion must retain the provider's number.
+    const firstIndex = parts[0]?.index ?? 0;
+    if (![0, 1].includes(firstIndex)) throw new AdapterError('API_RESPONSE');
+    for (const [position, part] of parts.entries()) {
+      const size = Math.min(blockSize, prepared.size - position * blockSize);
+      if (part.index !== position + firstIndex || typeof part.presigned_url !== 'string' || (part.block_size !== undefined && Number(part.block_size) !== size)) throw new AdapterError('API_RESPONSE');
+    }
+    for (const [position, part] of parts.entries()) {
       check();
-      const size = Math.min(blockSize, prepared.size - index * blockSize);
-      if (part.index !== index || typeof part.presigned_url !== 'string' || (part.block_size !== undefined && Number(part.block_size) !== size)) throw new AdapterError('API_RESPONSE');
-      const bytes = await reader.read(index * blockSize, size);
+      const size = Math.min(blockSize, prepared.size - position * blockSize);
+      const bytes = await reader.read(position * blockSize, size);
       await api.uploadPart(part.presigned_url, bytes); check();
-      await api.request('POST', route('upload_part_finish'), { upload_id: upload.upload_id, part_index: index, block_size: String(size), md5: createHash('md5').update(bytes).digest('hex') });
+      await api.request('POST', route('upload_part_finish'), { upload_id: upload.upload_id, part_index: part.index, block_size: String(size), md5: createHash('md5').update(bytes).digest('hex') });
     }
     check();
     return fileResult(await api.request('POST', route('files'), { file_type: prepared.fileType, srv_send_msg: false, file_name: prepared.fileName, upload_id: upload.upload_id }));

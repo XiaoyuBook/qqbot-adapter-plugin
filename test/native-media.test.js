@@ -57,6 +57,62 @@ test('large local files upload sequential bounded parts with whole and per-part 
   assert.deepEqual(calls.at(-1).body, { file_type: 4, srv_send_msg: false, file_name: 'large.bin', upload_id: 'upload-test' });
 });
 
+test('one-based video parts preserve the first bytes, tail and provider indices in group and c2c uploads', async () => {
+  const blockSize = 2 * 1024 * 1024;
+  const bytes = Buffer.concat([mp4, Buffer.alloc(5 * 1024 * 1024 + 7 - mp4.length, 23)]);
+  bytes.fill(47, blockSize, blockSize * 2); bytes.fill(89, blockSize * 2);
+  for (const scope of ['group', 'c2c']) {
+    const prepared = await prepareMedia('video', bytes, config(), 'clip.mp4');
+    const calls = [], uploaded = [];
+    const api = {
+      route: (actualScope, target, resource) => {
+        assert.equal(actualScope, scope); assert.equal(target, 'target');
+        return `/v2/${scope === 'group' ? 'groups' : 'users'}/target/${resource}`;
+      },
+      async request(method, route, body) {
+        calls.push({ method, route, body });
+        if (route.endsWith('/upload_prepare')) return {
+          upload_id: 'one-based', block_size: String(blockSize),
+          parts: [2, 0, 1].map(position => ({ index: position + 1, presigned_url: `https://unit.myqcloud.com/part-${position + 1}`, block_size: String(Math.min(blockSize, bytes.length - position * blockSize)) }))
+        };
+        return route.endsWith('/files') ? { file_info: 'complete' } : {};
+      },
+      async uploadPart(url, part) { uploaded.push({ url, bytes: Buffer.from(part) }); }
+    };
+    assert.equal((await uploadMedia(api, scope, 'target', prepared)).file_info, 'complete');
+    assert.deepEqual(Buffer.concat(uploaded.map(part => part.bytes)), bytes);
+    assert.deepEqual(uploaded.map(part => part.url), [1, 2, 3].map(index => `https://unit.myqcloud.com/part-${index}`));
+    const finishes = calls.filter(call => call.route.endsWith('/upload_part_finish'));
+    assert.deepEqual(finishes.map(call => call.body.part_index), [1, 2, 3]);
+    for (const [position, call] of finishes.entries()) {
+      assert.equal(call.body.block_size, String(uploaded[position].bytes.length));
+      assert.equal(call.body.md5, createHash('md5').update(uploaded[position].bytes).digest('hex'));
+    }
+    assert.deepEqual(calls.at(-1).body, { file_type: 2, srv_send_msg: false, file_name: 'clip.mp4', upload_id: 'one-based' });
+  }
+});
+
+test('invalid part sequences fail before sending bytes or completing an upload', async () => {
+  const bytes = Buffer.alloc(5 * 1024 * 1024 + 7), blockSize = 2 * 1024 * 1024;
+  for (const indices of [[-1, 0, 1], [2, 3, 4], [0, 1, 1], [1, 1, 2], [0, 2, 3], [1, 2, 4], [0, 1.5, 2], [1, '2', 3], [null, 1, 2]]) {
+    let uploaded = 0, finished = 0, merged = 0, closed = false;
+    const prepared = { fileType: 4, fileName: 'parts.bin', size: bytes.length, async open() {
+      return { read: async (offset, length) => bytes.subarray(offset, offset + length), close: async () => { closed = true; } };
+    } };
+    const api = { route: (_scope, _target, resource) => resource,
+      async request(_method, route) {
+        if (route === 'upload_prepare') return { upload_id: 'invalid', block_size: String(blockSize), parts: indices.map((index, position) => ({ index, presigned_url: `https://unit.myqcloud.com/part-${position}`, block_size: String(Math.min(blockSize, bytes.length - position * blockSize)) })) };
+        if (route === 'upload_part_finish') finished++;
+        if (route === 'files') merged++;
+        return {};
+      },
+      async uploadPart() { uploaded++; }
+    };
+    await assert.rejects(uploadMedia(api, 'group', 'g', prepared), { code: 'API_RESPONSE' });
+    assert.equal(uploaded, 0); assert.equal(finished, 0); assert.equal(merged, 0); assert.equal(closed, true);
+  }
+});
+
 test('file changes, private config, hardlinks, part failure and expired context never produce fake media success', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'qqbot-native-private-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
