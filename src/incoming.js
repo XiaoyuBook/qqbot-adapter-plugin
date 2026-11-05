@@ -14,6 +14,46 @@ function jumpUrl(value) {
   } catch { return null; }
 }
 
+// Describe only known schema keys and fixed type labels. Never log card text,
+// URLs, arbitrary field names, account IDs or message-scene credentials.
+const CARD_SCHEMA_KEYS = new Set(['ark_type', 'ark_name', 'prompt', 'fields', 'jump_url', 'jumpUrl', 'url', 'qqdocurl', 'share_url', 'shareUrl', 'link', 'link_url', 'h5_url', 'h5url', 'target_url', 'title', 'desc', 'description', 'preview', 'source', 'app', 'view', 'meta', 'data', 'content', 'detail', 'detail_1', 'news', 'video', 'music', 'key', 'value']);
+const CARD_LINK_KEYS = new Set(['jump_url', 'jumpUrl', 'url', 'qqdocurl', 'share_url', 'shareUrl', 'link', 'link_url', 'h5_url', 'h5url', 'target_url', 'preview']);
+const CARD_JSON_KEYS = new Set(['fields', 'meta', 'data', 'content']);
+function cardSchema(ark) {
+  let nodes = 0;
+  function describe(value, key, depth) {
+    if (++nodes > 48 || depth > 4) return 'limit';
+    if (value === null) return 'null';
+    if (typeof value === 'string') {
+      if (!value) return 'string:empty';
+      if (key === 'key' && CARD_SCHEMA_KEYS.has(value)) return 'key:' + value;
+      if (CARD_LINK_KEYS.has(key)) {
+        if (jumpUrl(value)) return 'url:' + new URL(value.trim().startsWith('//') ? 'https:' + value.trim() : value.trim()).protocol.slice(0, -1);
+        if (value.length > 4096) return 'url:too_long';
+        if (/[\s\x00-\x1f\x7f]/.test(value.trim())) return 'url:whitespace';
+        return /^[a-z][a-z0-9+.-]*:/i.test(value.trim()) ? 'url:unusable_scheme_or_auth' : 'url:missing_scheme_or_invalid';
+      }
+      if (CARD_JSON_KEYS.has(key) && value.length <= MAX_TEXT && /^[\s]*[\[{]/.test(value)) {
+        try { return { encodedJson: describe(JSON.parse(value), key, depth + 1) }; }
+        catch { return 'string:invalid_json'; }
+      }
+      return 'string';
+    }
+    if (Array.isArray(value)) return { array: value.slice(0, 2).map(item => describe(item, key, depth + 1)), more: value.length > 2 };
+    if (!record(value)) return typeof value;
+    const result = {}; let unknownKeys = 0;
+    for (const name of Object.keys(value)) {
+      if (!CARD_SCHEMA_KEYS.has(name)) { unknownKeys++; continue; }
+      if (nodes >= 48) { result.limit = true; break; }
+      result[name] = describe(value[name], name, depth + 1);
+    }
+    if (unknownKeys) result.otherKeyCount = unknownKeys;
+    return result;
+  }
+  const shape = describe(ark, '', 0);
+  return JSON.stringify(shape).length <= 4096 ? shape : 'limit';
+}
+
 function attachmentPart(attachment) {
   const mime = typeof attachment?.content_type === 'string' ? attachment.content_type : '';
   const type = /^image\/(png|jpeg|gif|webp|bmp)$/.test(mime) ? 'image' : mime === 'voice' || /^audio\//.test(mime) ? 'record' : mime === 'video/mp4' ? 'video' : ['file', 'application/octet-stream'].includes(mime) ? 'file' : null;
@@ -59,7 +99,11 @@ export function incomingMessage(data, scope) {
       summary.cards++;
       const url = record(node.ark_data) && record(node.ark_data.fields) ? jumpUrl(node.ark_data.fields.jump_url) : null;
       if (url) items.push({ type: 'card', url });
-      else summary.ignoredCards++;
+      else {
+        summary.ignoredCards++;
+        if (!summary.ignoredCardSchemas) summary.ignoredCardSchemas = [];
+        if (summary.ignoredCardSchemas.length < 2) summary.ignoredCardSchemas.push(cardSchema(node.ark_data));
+      }
     } else {
       text(node.content);
       if (node.attachments !== undefined) {

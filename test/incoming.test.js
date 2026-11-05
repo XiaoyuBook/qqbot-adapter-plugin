@@ -129,3 +129,24 @@ test('top-level platform mentions retain their position before attachments after
   assert.deepEqual(e.message.map(part => part.type), ['text', 'at', 'image']);
   assert.equal(e.message[1].qq, 'qqbot:123456:group-user:another-member');
 });
+
+test('rejected-card diagnostics reveal link field types while hiding values and arbitrary keys', async t => {
+  const f = fixture({ receiveGroupMessages: true }); t.after(() => f.registry.dispose());
+  await f.mapper.dispatch(message({ message_type: 3, content: 'PRIVATE_CHAT_TEXT', ark_data: { prompt: 'PRIVATE_PROMPT', fields: { jump_url: null, url: 'https://example.test/PRIVATE_PATH?token=SECRET', title: 'PRIVATE_TITLE', PRIVATE_USER_KEY: 'PRIVATE_USER' }, PRIVATE_TOP_KEY: 'PRIVATE_VALUE' }, message_scene: { ext: ['auth_token=PRIVATE_SCENE'] } }));
+  const line = f.logger.records.find(line => line.startsWith('[qqbot-adapter-plugin] incoming_card_schema '));
+  assert.ok(line); assert.match(line, /"jump_url":"null"/); assert.match(line, /"url":"url:https"/);
+  assert.equal(/PRIVATE|SECRET|example\.test/.test(line), false);
+  assert.ok(line.length < 4096);
+});
+
+test('schema diagnostics cover encoded or array fields without executing or leaking their content', () => {
+  for (const fields of [JSON.stringify({ jump_url: 'https://example.test/PRIVATE' }), [{ key: 'jump_url', value: 'https://example.test/PRIVATE' }]]) {
+    const result = incomingMessage(message({ message_type: 3, ark_data: { fields } }).d, 'group');
+    assert.deepEqual(result.parts, []);
+    const shape = JSON.stringify(result.summary.ignoredCardSchemas);
+    assert.ok(shape.includes('jump_url')); assert.equal(shape.includes('PRIVATE'), false);
+  }
+  const deep = { fields: {} }; deep.fields.data = deep;
+  const result = incomingMessage(message({ message_type: 3, ark_data: deep }).d, 'group');
+  assert.ok(JSON.stringify(result.summary.ignoredCardSchemas).length < 4096);
+});
