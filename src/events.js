@@ -5,32 +5,41 @@ import { AdapterError } from './errors.js';
 import { eventContext } from './context.js';
 import { role } from './group.js';
 import { richSegment } from './rich.js';
+import { incomingMessage } from './incoming.js';
 
-function groupContent(content, mentions, ownIds, registry, wasMentioned) {
-  const known = new Map(), seen = new Set(), parts = [];
+function groupContent(message, mentions, ownIds, registry, wasMentioned) {
+  const known = new Map(), seen = new Set(), parts = [], texts = [];
   if (mentions !== undefined && (!Array.isArray(mentions) || mentions.length > 100)) throw new AdapterError('EVENT_INVALID');
   for (const item of mentions ?? []) {
     const id = item?.member_openid ?? item?.id;
     if (validOpenid(id)) known.set(id, item);
   }
-  for (const id of ownIds) {
-    content = content.replace(new RegExp(`^\\s*<@!?${id}>\\s*`), () => { wasMentioned = true; return ''; });
+  let firstText = true;
+  for (const part of message) {
+    if (part.type !== 'text') { parts.push(part); continue; }
+    let content = part.text;
+    if (firstText) {
+      for (const id of ownIds) content = content.replace(new RegExp(`^\\s*<@!?${id}>\\s*`), () => { wasMentioned = true; return ''; });
+      content = content.trimStart(); firstText = false;
+    }
+    texts.push(content);
+    let offset = 0;
+    for (const match of content.matchAll(/<@!?([A-Za-z0-9_-]{1,128})>/g)) {
+      const id = match[1];
+      // Typed tag-like text alone cannot supply an identity or disappear.
+      if (!known.has(id)) continue;
+      if (match.index > offset) parts.push({ type: 'text', text: content.slice(offset, match.index) });
+      if (ownIds.has(id)) wasMentioned = true;
+      else parts.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof known.get(id).username === 'string' ? known.get(id).username.slice(0, 200) : '' });
+      seen.add(id); offset = match.index + match[0].length;
+    }
+    if (offset < content.length) parts.push({ type: 'text', text: content.slice(offset) });
   }
-  content = content.trimStart();
-  let offset = 0;
-  for (const match of content.matchAll(/<@!?([A-Za-z0-9_-]{1,128})>/g)) {
-    const id = match[1];
-    // Only platform-provided mentions are parsed; typed tag-like text alone
-    // cannot supply a user identity or silently disappear from command text.
-    if (!known.has(id)) continue;
-    if (match.index > offset) parts.push({ type: 'text', text: content.slice(offset, match.index) });
-    if (ownIds.has(id)) wasMentioned = true;
-    else parts.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof known.get(id).username === 'string' ? known.get(id).username.slice(0, 200) : '' });
-    seen.add(id); offset = match.index + match[0].length;
-  }
-  if (offset < content.length) parts.push({ type: 'text', text: content.slice(offset) });
-  for (const [id, item] of known) if (!seen.has(id) && !ownIds.has(id)) parts.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof item.username === 'string' ? item.username.slice(0, 200) : '' });
-  return { content, parts, atBot: wasMentioned };
+  const remaining = [];
+  for (const [id, item] of known) if (!seen.has(id) && !ownIds.has(id)) remaining.push({ type: 'at', qq: registry.userId('group-user', id), text: typeof item.username === 'string' ? item.username.slice(0, 200) : '' });
+  const mediaIndex = parts.findIndex(part => !['text', 'at'].includes(part.type));
+  parts.splice(mediaIndex < 0 ? parts.length : mediaIndex, 0, ...remaining);
+  return { content: texts.join('\n'), parts, atBot: wasMentioned };
 }
 
 export class EventDeduplicator {
@@ -83,7 +92,8 @@ export class EventMapper {
     const userId = this.registry.userId(scope === 'group' ? 'group-user' : 'c2c-user', openid);
     const groupId = scope === 'group' ? identity(this.config.appId, 'group', target) : undefined;
     const ownIds = new Set([this.platformBotId, this.registry.groupStates.get(target)?.value?.member_openid].filter(validOpenid));
-    const parsed = scope === 'group' ? groupContent(d.content || '', d.mentions, ownIds, this.registry, payload.t === 'GROUP_AT_MESSAGE_CREATE') : { content: d.content || '', parts: d.content ? [{ type: 'text', text: d.content }] : [], atBot: false };
+    const incoming = incomingMessage(d, scope);
+    const parsed = scope === 'group' ? groupContent(incoming.parts, d.mentions, ownIds, this.registry, payload.t === 'GROUP_AT_MESSAGE_CREATE') : { content: incoming.parts.filter(part => part.type === 'text').map(part => part.text).join('\n'), parts: incoming.parts, atBot: false };
     const content = parsed.content;
     const nickname = typeof d.author.username === 'string' && d.author.username.length <= 200 ? d.author.username : 'QQBot 用户';
     const sender = { user_id: userId, nickname, card: nickname, role: role(d.author.member_role) };
@@ -99,20 +109,10 @@ export class EventMapper {
       message_id: d.id, time: Math.floor(timestamp / 1000), raw_message: content,
       sender, message: [], adapter: 'QQBot',
       isGroup: scope === 'group', isPrivate: scope === 'c2c', atBot,
-      qqbot: { appId: this.config.appId, scope, principalId, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: [], compatibility: [], lastError: null, segment: richSegment }
+      qqbot: { appId: this.config.appId, scope, principalId, userOpenid: openid, ...(scope === 'group' ? { groupOpenid: target } : {}), eventId: typeof payload.id === 'string' ? payload.id : undefined, referenceId, unsupportedAttachments: incoming.unsupportedAttachments, incoming: incoming.summary, compatibility: [], lastError: null, segment: richSegment }
     };
     if (atBot) event.message.push({ type: 'at', qq: this.registry.id, text: 'QQ 官方机器人' });
     event.message.push(...parsed.parts);
-    for (const attachment of d.attachments || []) {
-      const kind = attachment && (/^image\/(png|jpeg|gif|webp|bmp)$/.test(attachment.content_type) ? 'image' : attachment.content_type === 'voice' || /^audio\//.test(attachment.content_type) ? 'record' : attachment.content_type === 'video/mp4' ? 'video' : attachment.content_type === 'file' || attachment.content_type === 'application/octet-stream' ? 'file' : null);
-      if (kind && typeof attachment.url === 'string') {
-        let url;
-        try { url = new URL(attachment.url.startsWith('//') ? `https:${attachment.url}` : attachment.url); }
-        catch { throw new AdapterError('EVENT_INVALID'); }
-        if (url.protocol !== 'https:' || url.username || url.password) throw new AdapterError('EVENT_INVALID');
-        event.message.push({ type: kind, url: url.href, file: url.href, ...(typeof attachment.filename === 'string' ? { name: attachment.filename.slice(0, 255) } : {}), ...(Number.isSafeInteger(attachment.size) && attachment.size >= 0 ? { size: attachment.size } : {}), ...(kind === 'record' && typeof attachment.asr_refer_text === 'string' ? { asr: attachment.asr_refer_text.slice(0, 64000) } : {}) });
-      } else event.qqbot.unsupportedAttachments.push('unsupported');
-    }
     fixMaster(event, isMaster(this.config, scope, openid));
     if (sourceReference) event.source = { message_id: sourceReference, ref_idx: sourceReference, message: [] };
     this.registry.rememberMessage(scope, target, d.id, { own: false, at: timestamp, ref_idx: referenceId });
@@ -136,6 +136,10 @@ export class EventMapper {
     }
     // ICQQ TripTrap emits only the named root. Never also emit message.group or
     // call PluginsLoader.deal: either would run the same business handler twice.
+    if (incoming.summary.cards || incoming.summary.skippedHistory) {
+      const { messageType, cards, mappedCards, ignoredCards, skippedHistory, skippedAuthors } = incoming.summary;
+      this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card type=${messageType ?? 'legacy'} cards=${cards} mapped=${mappedCards} ignored=${ignoredCards} history=${skippedHistory} authors=${skippedAuthors}`);
+    }
     eventContext.run({ registry: this.registry, event, reply, scope, target }, () => this.registry.host.emit('message', event));
     return event;
   }
