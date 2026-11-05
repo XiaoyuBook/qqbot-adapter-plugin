@@ -16,7 +16,7 @@ function groupContent(message, mentions, ownIds, registry, wasMentioned) {
   }
   let firstText = true;
   for (const part of message) {
-    if (part.type !== 'text') { parts.push(part); continue; }
+    if (part.type !== 'text') { parts.push(part); if (part.type === 'json') texts.push(part.data); continue; }
     let content = part.text;
     if (firstText) {
       for (const id of ownIds) content = content.replace(new RegExp(`^\\s*<@!?${id}>\\s*`), () => { wasMentioned = true; return ''; });
@@ -93,7 +93,7 @@ export class EventMapper {
     const groupId = scope === 'group' ? identity(this.config.appId, 'group', target) : undefined;
     const ownIds = new Set([this.platformBotId, this.registry.groupStates.get(target)?.value?.member_openid].filter(validOpenid));
     const incoming = incomingMessage(d, scope);
-    const parsed = scope === 'group' ? groupContent(incoming.parts, d.mentions, ownIds, this.registry, payload.t === 'GROUP_AT_MESSAGE_CREATE') : { content: incoming.parts.filter(part => part.type === 'text').map(part => part.text).join('\n'), parts: incoming.parts, atBot: false };
+    const parsed = scope === 'group' ? groupContent(incoming.parts, d.mentions, ownIds, this.registry, payload.t === 'GROUP_AT_MESSAGE_CREATE') : { content: incoming.parts.filter(part => ['text', 'json'].includes(part.type)).map(part => part.type === 'json' ? part.data : part.text).join('\n'), parts: incoming.parts, atBot: false };
     const content = parsed.content;
     const nickname = typeof d.author.username === 'string' && d.author.username.length <= 200 ? d.author.username : 'QQBot 用户';
     const sender = { user_id: userId, nickname, card: nickname, role: role(d.author.member_role) };

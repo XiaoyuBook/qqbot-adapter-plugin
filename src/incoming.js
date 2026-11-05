@@ -3,55 +3,32 @@ import { AdapterError } from './errors.js';
 const MAX_TEXT = 64000, MAX_ELEMENTS = 100, MAX_DEPTH = 8, MAX_ATTACHMENTS = 10;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-function jumpUrl(value) {
-  if (typeof value !== 'string' || value.length > 4096) return null;
-  const text = value.trim();
-  if (!text || /[\s\x00-\x1f\x7f]/.test(text)) return null;
-  try {
-    const url = new URL(text.startsWith('//') ? 'https:' + text : text);
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
-    return url.href;
-  } catch { return null; }
-}
-
-// Describe only known schema keys and fixed type labels. Never log card text,
-// URLs, arbitrary field names, account IDs or message-scene credentials.
-const CARD_SCHEMA_KEYS = new Set(['ark_type', 'ark_name', 'prompt', 'fields', 'jump_url', 'jumpUrl', 'url', 'qqdocurl', 'share_url', 'shareUrl', 'link', 'link_url', 'h5_url', 'h5url', 'target_url', 'title', 'desc', 'description', 'preview', 'source', 'app', 'view', 'meta', 'data', 'content', 'detail', 'detail_1', 'news', 'video', 'music', 'key', 'value']);
-const CARD_LINK_KEYS = new Set(['jump_url', 'jumpUrl', 'url', 'qqdocurl', 'share_url', 'shareUrl', 'link', 'link_url', 'h5_url', 'h5url', 'target_url', 'preview']);
-const CARD_JSON_KEYS = new Set(['fields', 'meta', 'data', 'content']);
-function cardSchema(ark) {
-  let nodes = 0;
-  function describe(value, key, depth) {
-    if (++nodes > 48 || depth > 4) return 'limit';
-    if (value === null) return 'null';
-    if (typeof value === 'string') {
-      if (!value) return 'string:empty';
-      if (key === 'key' && CARD_SCHEMA_KEYS.has(value)) return 'key:' + value;
-      if (CARD_LINK_KEYS.has(key)) {
-        if (jumpUrl(value)) return 'url:' + new URL(value.trim().startsWith('//') ? 'https:' + value.trim() : value.trim()).protocol.slice(0, -1);
-        if (value.length > 4096) return 'url:too_long';
-        if (/[\s\x00-\x1f\x7f]/.test(value.trim())) return 'url:whitespace';
-        return /^[a-z][a-z0-9+.-]*:/i.test(value.trim()) ? 'url:unusable_scheme_or_auth' : 'url:missing_scheme_or_invalid';
-      }
-      if (CARD_JSON_KEYS.has(key) && value.length <= MAX_TEXT && /^[\s]*[\[{]/.test(value)) {
-        try { return { encodedJson: describe(JSON.parse(value), key, depth + 1) }; }
-        catch { return 'string:invalid_json'; }
-      }
-      return 'string';
-    }
-    if (Array.isArray(value)) return { array: value.slice(0, 2).map(item => describe(item, key, depth + 1)), more: value.length > 2 };
-    if (!record(value)) return typeof value;
-    const result = {}; let unknownKeys = 0;
-    for (const name of Object.keys(value)) {
-      if (!CARD_SCHEMA_KEYS.has(name)) { unknownKeys++; continue; }
-      if (nodes >= 48) { result.limit = true; break; }
-      result[name] = describe(value[name], name, depth + 1);
-    }
-    if (unknownKeys) result.otherKeyCount = unknownKeys;
-    return result;
+// Match the host/ICQQ JSON element contract. Preserve all provider card fields;
+// interpreting a card's business links belongs to the consuming plugin.
+function jsonCard(value) {
+  if (typeof value === 'string') {
+    if (value.length > MAX_TEXT) throw new AdapterError('EVENT_INVALID');
+    try { value = JSON.parse(value); } catch { return null; }
   }
-  const shape = describe(ark, '', 0);
-  return JSON.stringify(shape).length <= 4096 ? shape : 'limit';
+  if (!record(value)) return null;
+  let nodes = 0;
+  const ancestors = new Set();
+  function validate(item, depth) {
+    if (++nodes > 1024 || depth > MAX_DEPTH) throw new AdapterError('EVENT_INVALID');
+    if (item === null || typeof item === 'boolean') return;
+    if (typeof item === 'string') { if (item.length > MAX_TEXT) throw new AdapterError('EVENT_INVALID'); return; }
+    if (typeof item === 'number' && Number.isFinite(item)) return;
+    if ((!record(item) && !Array.isArray(item)) || ancestors.has(item)) throw new AdapterError('EVENT_INVALID');
+    const keys = Object.keys(item);
+    if (keys.length > 128) throw new AdapterError('EVENT_INVALID');
+    ancestors.add(item);
+    for (const key of keys) validate(item[key], depth + 1);
+    ancestors.delete(item);
+  }
+  validate(value, 0);
+  const data = JSON.stringify(value);
+  if (data.length > MAX_TEXT) throw new AdapterError('EVENT_INVALID');
+  return { type: 'json', data };
 }
 
 function attachmentPart(attachment) {
@@ -68,8 +45,8 @@ function attachmentPart(attachment) {
     ...(type === 'record' && typeof attachment.asr_refer_text === 'string' ? { asr: attachment.asr_refer_text.slice(0, MAX_TEXT) } : {}) };
 }
 
-// Only current-message content becomes executable host text. Card labels, cover
-// URLs, history and reference elements never supply commands or user identities.
+// Only current-message elements enter the host message. Cards retain JSON data;
+// history, references and nested author metadata cannot supply new commands or identities.
 export function incomingMessage(data, scope) {
   const items = [], unsupportedAttachments = [];
   const summary = { messageType: Number.isSafeInteger(data.message_type) ? data.message_type : null, cards: 0, mappedCards: 0, ignoredCards: 0, skippedHistory: 0, skippedAuthors: 0 };
@@ -97,12 +74,12 @@ export function incomingMessage(data, scope) {
     const card = type === 3 || type === undefined && node.ark_data !== undefined;
     if (card) {
       summary.cards++;
-      const url = record(node.ark_data) && record(node.ark_data.fields) ? jumpUrl(node.ark_data.fields.jump_url) : null;
-      if (url) items.push({ type: 'card', url });
+      const part = jsonCard(node.ark_data ?? node.content);
+      if (part) items.push(part);
       else {
         summary.ignoredCards++;
         if (!summary.ignoredCardSchemas) summary.ignoredCardSchemas = [];
-        if (summary.ignoredCardSchemas.length < 2) summary.ignoredCardSchemas.push(cardSchema(node.ark_data));
+        if (summary.ignoredCardSchemas.length < 2) summary.ignoredCardSchemas.push(node.ark_data === null ? 'null' : Array.isArray(node.ark_data) ? 'array' : typeof node.ark_data);
       }
     } else {
       text(node.content);
@@ -123,25 +100,21 @@ export function incomingMessage(data, scope) {
     }
   }
   visit(data, 0, true);
-  const links = new Set();
-  for (const item of items) if (item.type === 'text') {
-    for (const match of item.text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
-      const url = jumpUrl(match[0].replace(/[.,;!，。；！、)\]}]+$/, ''));
-      if (url) links.add(url);
-    }
+  const parts = [], cards = new Set();
+  let outputLength = 0, values = 0;
+  function reserve(length) {
+    if ((outputLength += length + (values++ ? 1 : 0)) > MAX_TEXT) throw new AdapterError('EVENT_INVALID');
   }
-  const parts = [];
-  let outputLength = 0, textParts = 0;
   function appendText(value) {
-    if ((outputLength += value.length + (textParts++ ? 1 : 0)) > MAX_TEXT) throw new AdapterError('EVENT_INVALID');
+    reserve(value.length);
     const previous = parts.at(-1);
     if (previous?.type === 'text') previous.text += '\n' + value;
     else parts.push({ type: 'text', text: value });
   }
   for (const item of items) {
-    if (item.type === 'card') {
-      if (links.has(item.url)) continue;
-      links.add(item.url); summary.mappedCards++; appendText(item.url);
+    if (item.type === 'json') {
+      if (cards.has(item.data)) continue;
+      reserve(item.data.length); cards.add(item.data); summary.mappedCards++; parts.push(item);
     } else if (item.type === 'text') appendText(item.text);
     else parts.push(item);
   }
