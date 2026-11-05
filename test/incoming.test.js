@@ -119,7 +119,8 @@ test('nested attachment validation retains HTTPS and unsupported-media behavior'
 test('card diagnostics contain fixed types and counts without payload values or identities', async t => {
   const f = fixture({ receiveGroupMessages: true }); t.after(() => f.registry.dispose());
   await f.mapper.dispatch(message({ ...card('https://b23.tv/PRIVATE?token=SECRET'), message_scene: { ext: ['auth_token=SCENE_SECRET'] } }));
-  assert.deepEqual(f.logger.records, ['[qqbot-adapter-plugin] incoming_card type=3 cards=1 mapped=1 ignored=0 history=0 authors=0']);
+  assert.equal(f.logger.records[0], '[qqbot-adapter-plugin] incoming_card type=3 cards=1 mapped=1 ignored=0 history=0 authors=0');
+  assert.ok(f.logger.records[1].startsWith('[qqbot-adapter-plugin] incoming_card_details '));
   await f.mapper.dispatch(message({ id: 'bad', message_type: 3, ark_data: 'PRIVATE_INVALID_JSON' }));
   assert.equal(f.logger.records.at(-1), '[qqbot-adapter-plugin] incoming_card_schema ["string"]');
   assert.equal(/PRIVATE|SECRET/.test(JSON.stringify(f.logger.records)), false);

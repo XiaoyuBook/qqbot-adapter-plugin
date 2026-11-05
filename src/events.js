@@ -139,6 +139,7 @@ export class EventMapper {
     if (incoming.summary.cards || incoming.summary.skippedHistory) {
       const { messageType, cards, mappedCards, ignoredCards, skippedHistory, skippedAuthors } = incoming.summary;
       this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card type=${messageType ?? 'legacy'} cards=${cards} mapped=${mappedCards} ignored=${ignoredCards} history=${skippedHistory} authors=${skippedAuthors}`);
+      if (incoming.summary.cardSchemas) this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card_details ${JSON.stringify(incoming.summary.cardSchemas)}`);
       if (incoming.summary.ignoredCardSchemas) this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card_schema ${JSON.stringify(incoming.summary.ignoredCardSchemas)}`);
     }
     eventContext.run({ registry: this.registry, event, reply, scope, target }, () => this.registry.host.emit('message', event));

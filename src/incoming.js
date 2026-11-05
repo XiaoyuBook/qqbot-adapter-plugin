@@ -1,4 +1,5 @@
 import { AdapterError } from './errors.js';
+import { cardDiagnostics } from './card-diagnostics.js';
 
 const MAX_TEXT = 64000, MAX_ELEMENTS = 100, MAX_DEPTH = 8, MAX_ATTACHMENTS = 10;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -75,7 +76,11 @@ export function incomingMessage(data, scope) {
     if (card) {
       summary.cards++;
       const part = jsonCard(node.ark_data ?? node.content);
-      if (part) items.push(part);
+      if (part) {
+        items.push(part);
+        summary.cardSchemas ??= [];
+        if (summary.cardSchemas.length < 2) summary.cardSchemas.push(cardDiagnostics(JSON.parse(part.data), node.content));
+      }
       else {
         summary.ignoredCards++;
         if (!summary.ignoredCardSchemas) summary.ignoredCardSchemas = [];
