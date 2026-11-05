@@ -138,7 +138,7 @@ async function uploadPreparedMedia(api, scope, target, prepared, check) {
     check();
     const upload = await api.request('POST', route('upload_prepare'), { file_type: prepared.fileType, file_size: String(prepared.size), file_name: prepared.fileName, md5: md5.digest('hex'), sha1: sha1.digest('hex'), md5_10m: md5_10m.digest('hex') });
     const blockSize = Number(upload.block_size);
-    if (typeof upload.upload_id !== 'string' || !upload.upload_id || upload.upload_id.length > 2048 || !Number.isInteger(blockSize) || blockSize < 1 || blockSize > 20 * 1024 * 1024 || !Array.isArray(upload.parts) || (upload.parts.length && upload.parts.length !== Math.ceil(prepared.size / blockSize)) || upload.parts.length > 1000) throw new AdapterError('API_RESPONSE');
+    if (typeof upload.upload_id !== 'string' || !upload.upload_id || upload.upload_id.length > 2048 || !Number.isInteger(blockSize) || blockSize < 1 || blockSize > hardLimit || !Array.isArray(upload.parts) || (upload.parts.length && upload.parts.length !== Math.ceil(prepared.size / blockSize)) || upload.parts.length > 1000) throw new AdapterError('API_RESPONSE');
     if (upload.parts.some(part => !part || !Number.isInteger(part.index))) throw new AdapterError('API_RESPONSE');
     const parts = [...upload.parts].sort((a, b) => a.index - b.index);
     // Provider responses use either zero-based or one-based part numbers. Byte

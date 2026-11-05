@@ -141,3 +141,29 @@ test('Markdown images use matching MIME, hashes, ETag and return platform refere
   assert.deepEqual(image, { image_id: 'asset', url: 'qqbot-media://image/v1/FAKE_TOKEN', ttl: 7776000 });
   assert.equal(calls[0].body.content_type, 'image/png'); assert.equal(calls[0].body.file_size, png.length); assert.equal(calls[1].body.md5, hash);
 });
+
+// Providers may choose one part larger than 20 MiB for an otherwise valid video.
+test('provider-sized single parts above 20 MiB retain video/file types and exact bytes', async () => {
+  const bytes = Buffer.concat([mp4, Buffer.alloc(24 * 1024 * 1024 - mp4.length, 29)]);
+  for (const [kind, scope, index, blockSize] of [['video', 'group', 1, bytes.length], ['video', 'c2c', 0, 32 * 1024 * 1024], ['file', 'group', 1, 200 * 1024 * 1024]]) {
+    const prepared = await prepareMedia(kind, bytes, config(), 'large.mp4'), calls = []; let uploaded = false;
+    const api = { route: (_scope, _target, resource) => resource, async request(_method, route, body) {
+      calls.push({route, body});
+      if (route === 'upload_prepare') return { upload_id: 'provider-size', block_size: String(blockSize), parts: [{ index, block_size: String(bytes.length), presigned_url: 'https://unit.myqcloud.com/whole' }] };
+      return route === 'files' ? { file_info: 'complete' } : {};
+    }, async uploadPart(_url, part) { assert.deepEqual(part, bytes); uploaded = true; } };
+    assert.equal((await uploadMedia(api, scope, 'target', prepared)).file_info, 'complete');
+    assert.equal(uploaded, true);
+    const fileType = kind === 'video' ? 2 : 4;
+    assert.equal(calls[0].body.file_type, fileType); assert.equal(calls.at(-1).body.file_type, fileType);
+    const finish = calls.find(call => call.route === 'upload_part_finish');
+    assert.equal(finish.body.part_index, index); assert.equal(finish.body.block_size, String(bytes.length));
+    assert.equal(finish.body.md5, createHash('md5').update(bytes).digest('hex'));
+  }
+});
+
+test('provider block size remains bounded by the media hard limit before any part is sent', async () => {
+  const prepared = await prepareMedia('file', Buffer.alloc(5 * 1024 * 1024), config()); let uploaded = false;
+  const api = { route: (_scope, _target, resource) => resource, request: async () => ({ upload_id: 'oversized-block', block_size: String(200 * 1024 * 1024 + 1), parts: [{ index: 1, presigned_url: 'https://unit.myqcloud.com/whole' }] }), uploadPart: async () => { uploaded = true; } };
+  await assert.rejects(uploadMedia(api, 'group', 'target', prepared), {code:'API_RESPONSE'}); assert.equal(uploaded, false);
+});
