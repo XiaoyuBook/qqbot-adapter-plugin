@@ -1,3 +1,4 @@
+import { pluginVersion } from './metadata.js';
 import { accountId, identity, UserIdentities } from './identity.js';
 import { AdapterError, logFailure, safeError } from './errors.js';
 import { makeForwardMsg } from './forward.js';
@@ -42,7 +43,7 @@ export class AccountRegistry {
     this.account = {
       uin: this.id, self_id: this.id, appId: config.appId,
       nickname: 'QQ 官方机器人', adapter: 'QQBot',
-      version: { id: 'qqbot-adapter-plugin', version: '0.2.9' },
+      version: { id: 'qqbot-adapter-plugin', version: pluginVersion },
       fl: new Map(), gl: new Map(), gml: new Map(),
       isOnline: () => this.online,
       pickFriend: id => this.#pick(id, 'c2c-user', this.account.fl),

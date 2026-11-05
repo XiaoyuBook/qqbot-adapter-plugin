@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}}</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; width: 960px; color: #21354a; background: #edf3f8; font: 23px/1.55 "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+.container { width: 960px; padding: 42px; background: linear-gradient(145deg, #e9f3fc, #f6f8fb 52%, #eff5f4); }
+.header { padding: 0 4px 27px; border-bottom: 2px solid #c9d9e6; margin-bottom: 26px; }
+.brand { color: #34749a; font-size: 18px; font-weight: 700; letter-spacing: 3px; margin-bottom: 8px; }
+h1 { font-size: 46px; line-height: 1.25; letter-spacing: 1px; margin: 0 0 12px; color: #163652; }
+.subtitle { color: #52677a; font-size: 21px; }
+.version { display: inline-block; margin-left: 14px; background: #dcecf7; color: #286187; padding: 3px 12px; font-size: 20px; vertical-align: middle; border-radius: 8px; letter-spacing: 0; }
+h2 { font-size: 27px; margin: 0 0 18px; color: #246080; }
+.section { border-radius: 16px; border: 1px solid #d5e0e9; background: #fff; padding: 24px 27px; margin-bottom: 22px; }
+.commands { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 28px; }
+.command { font-size: 23px; font-weight: 700; color: #214c6d; overflow-wrap: anywhere; }
+.description { margin-top: 6px; font-size: 21px; color: #526579; }
+.status { font-size: 22px; padding: 14px 22px; background: #e1edf5; border-radius: 12px; margin-bottom: 22px; }
+.settings { padding: 8px 27px; }
+.setting { padding: 17px 0; border-bottom: 1px solid #e2e9ef; }
+.setting:last-child { border-bottom: 0; }
+.row { display: flex; align-items: center; gap: 18px; justify-content: space-between; }
+.name { font-size: 25px; font-weight: 700; }
+.usage { color: #63778b; font-size: 20px; margin-left: 14px; font-weight: 400; }
+.value { color: #5b6e7d; background: #edf1f5; border-radius: 8px; padding: 2px 14px; font-size: 22px; white-space: nowrap; }
+.value.on { color: #176a50; background: #dff1e9; }
+.value.numeric { color: #255b87; background: #e5eff8; }
+.note { font-size: 20px; color: #5b6e7e; margin-top: 5px; }
+.tips { border-left: 4px solid #75a9c5; padding: 2px 0 2px 20px; margin: 24px 3px 16px; color: #4d6478; font-size: 21px; }
+.tip { margin: 9px 0; }
+.footer { padding-top: 18px; color: #728496; font-size: 18px; text-align: center; }
+</style>
+</head>
+<body><div class="container">
+<header class="header"><div class="brand">QQBOT ADAPTER</div><h1>{{title}}<span class="version">v{{version}}</span></h1><div class="subtitle">{{subtitle}}</div></header>
+{{if mode === 'settings'}}
+<div class="status">连接状态：{{connection}} · 当前为本地配置值</div>
+<section class="section settings">
+{{each rows row}}<div class="setting"><div class="row"><div class="name">{{row.name}}<span class="usage">{{row.usage}}</span></div><div class="value {{if row.enabled}}on{{/if}} {{if row.numeric}}numeric{{/if}}">{{row.value}}</div></div>{{if row.note}}<div class="note">{{row.note}}</div>{{/if}}</div>{{/each}}
+</section>
+{{else}}
+{{each sections section}}<section class="section"><h2>{{section.title}}</h2><div class="commands">{{each section.items item}}<div><div class="command">{{item.command}}</div><div class="description">{{item.description}}</div></div>{{/each}}</div></section>{{/each}}
+{{/if}}
+<div class="tips">{{each notices notice}}<div class="tip">{{notice}}</div>{{/each}}</div>
+<footer class="footer">qqbot-adapter-plugin · 使用 #QQBot帮助 / #QQBot设置</footer>
+</div></body></html>

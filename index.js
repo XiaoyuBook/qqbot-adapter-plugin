@@ -1,7 +1,8 @@
 import { startRuntime } from './src/controller.js';
+import { createCommandPlugin } from './src/commands.js';
 
 // The Miao loader instantiates every exported function with a prototype.
-// Export only the lifecycle plugin, never transport/account utility classes.
+// Expose only real lifecycle/command plugins, never account or transport classes.
 class QQBotAdapterBootstrap {
   constructor() { this.name = 'qqbot-adapter-plugin'; }
   async init() {
@@ -9,4 +10,5 @@ class QQBotAdapterBootstrap {
     return 'return';
   }
 }
-export const apps = { QQBotAdapterBootstrap };
+const QQBotCommands = createCommandPlugin(globalThis.plugin);
+export const apps = { QQBotAdapterBootstrap, QQBotCommands };

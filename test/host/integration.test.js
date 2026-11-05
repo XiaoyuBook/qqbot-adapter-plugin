@@ -92,14 +92,15 @@ test('real NapCat BotInit before/after QQBot retains default account and event r
     assert.equal(f.bot.uin, 10001); assert.equal(event.bot, f.registry.account); assert.equal(f.bot.adapter.filter(v => v === f.registry.id).length, 1);
   }
 });
-test('real Miao loadPlugin instantiates only bootstrap, returns before business registration, repeated init harmless', async t => {
+test('real Miao loads lifecycle and command plugins only; repeated lifecycle init is harmless', async t => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'qqbot-bootstrap-')); t.after(() => fs.rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
-  const before = { Bot: globalThis.Bot, logger: globalThis.logger, directory: process.env.QQBOT_ADAPTER_PRIVATE_DIR };
+  const before = { Bot: globalThis.Bot, logger: globalThis.logger, plugin: globalThis.plugin, directory: process.env.QQBOT_ADAPTER_PRIVATE_DIR };
   process.env.QQBOT_ADAPTER_PRIVATE_DIR = temp;
-  const f = await harness(t); globalThis.Bot = f.bot; globalThis.logger = f.logger;
+  const f = await harness(t); globalThis.Bot = f.bot; globalThis.logger = f.logger; globalThis.plugin = f.Plugin;
   const key = Symbol.for('qqbot-adapter-plugin.runtime.v1');
-  t.after(async () => { await globalThis[key]?.controller?.stop(); delete globalThis[key]; globalThis.Bot = before.Bot; globalThis.logger = before.logger; if (before.directory === undefined) delete process.env.QQBOT_ADAPTER_PRIVATE_DIR; else process.env.QQBOT_ADAPTER_PRIVATE_DIR = before.directory; });
-  const entry = await import('../../index.js'); assert.deepEqual(Object.keys(entry), ['apps']); assert.equal(Object.keys(entry.apps).length, 1);
-  const Bootstrap = Object.values(entry.apps)[0]; await f.loader.loadPlugin({ name: 'qqbot-adapter-plugin' }, Bootstrap); await f.loader.loadPlugin({ name: 'qqbot-adapter-plugin' }, Bootstrap);
-  assert.equal(f.loader.priority.length, 0); assert.equal(globalThis[key].controller.status.state, 'disabled'); assert.equal(globalThis[key].controller.active, null);
+  t.after(async () => { await globalThis[key]?.controller?.stop(); delete globalThis[key]; globalThis.Bot = before.Bot; globalThis.logger = before.logger; globalThis.plugin = before.plugin; if (before.directory === undefined) delete process.env.QQBOT_ADAPTER_PRIVATE_DIR; else process.env.QQBOT_ADAPTER_PRIVATE_DIR = before.directory; });
+  const entry = await import('../../index.js'); assert.deepEqual(Object.keys(entry), ['apps']); assert.equal(Object.keys(entry.apps).length, 2);
+  const { QQBotAdapterBootstrap: Bootstrap, QQBotCommands } = entry.apps; await f.loader.loadPlugin({ name: 'qqbot-adapter-plugin' }, Bootstrap); await f.loader.loadPlugin({ name: 'qqbot-adapter-plugin' }, Bootstrap);
+  await f.loader.loadPlugin({ name: 'qqbot-adapter-plugin' }, QQBotCommands);
+  assert.equal(f.loader.priority.length, 1); assert.equal(f.loader.priority[0].name, 'QQBot帮助与设置'); assert.equal(globalThis[key].controller.status.state, 'disabled'); assert.equal(globalThis[key].controller.active, null);
 });

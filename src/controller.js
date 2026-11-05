@@ -3,7 +3,7 @@ import { AccountRegistry } from './accounts.js';
 import { OfficialApi } from './api.js';
 import { GatewayTransport } from './transport.js';
 import { EventDeduplicator, EventMapper } from './events.js';
-import { logFailure } from './errors.js';
+import { AdapterError, logFailure } from './errors.js';
 import { captureIncomingCard } from './card-capture.js';
 
 export class AdapterController {
@@ -26,6 +26,27 @@ export class AdapterController {
   stop() { return this.#enqueue(() => this.#stop()); }
   start() { return this.#enqueue(async () => { if (!this.active) await this.#start(); }); }
   reload() { return this.#enqueue(async () => { await this.#stop(); await this.#start(); }); }
+  configure(patch, { authorize, acknowledge } = {}) {
+    return this.#enqueue(async () => {
+      const { config } = await this.store.read();
+      // Check the current grants inside the same queue as save and reload.
+      if (!authorize?.(config)) throw new AdapterError('PERMISSION_REQUIRED');
+      const changed = Object.entries(patch).some(([key, value]) => config[key] !== value);
+      const saved = changed ? await this.store.save(patch) : config;
+      try { await acknowledge?.(saved, changed); }
+      catch (error) { logFailure(this.logger, 'settings_acknowledge', error); }
+      if (!changed) return { changed: false, applied: true };
+      // Finish the confirmation on the old reply context before disposing it.
+      try {
+        await this.#stop(); await this.#start();
+        return { changed: true, applied: true };
+      } catch (error) {
+        this.status = { state: 'error', reason: 'config_reload_failed' };
+        logFailure(this.logger, 'settings_reload', error);
+        return { changed: true, applied: false };
+      }
+    });
+  }
   async #start() {
     const { config, appSecret } = await this.store.read();
     if (!config.enabled) { this.status = { state: 'disabled' }; return; }
@@ -54,6 +75,7 @@ export class AdapterController {
       this.active = { registry, api, mapper, transport };
       transport.start();
     } catch (error) {
+      this.active?.transport.stop(); this.active = null;
       api?.close(); registry.dispose(); throw error;
     }
   }
