@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { imageSize } from 'image-size';
 import { AdapterError } from './errors.js';
+import { preparePlayableVideo } from './video.js';
 
 const directLimit = 4 * 1024 * 1024;
 const hardLimit = 200 * 1024 * 1024;
@@ -112,6 +113,13 @@ export async function markdownImageDimensions(prepared) {
 }
 
 export async function uploadMedia(api, scope, target, prepared, check = () => {}) {
+  check();
+  const video = await preparePlayableVideo(prepared, check);
+  try { return await uploadPreparedMedia(api, scope, target, video.prepared, check); }
+  finally { await video.cleanup(); }
+}
+
+async function uploadPreparedMedia(api, scope, target, prepared, check) {
   check();
   const route = resource => api.route(scope, target, resource);
   if (prepared.url) return fileResult(await api.request('POST', route('files'), { file_type: prepared.fileType, srv_send_msg: false, url: prepared.url, ...(prepared.fileName ? { file_name: prepared.fileName } : {}) }));
