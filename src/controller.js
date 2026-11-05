@@ -4,6 +4,7 @@ import { OfficialApi } from './api.js';
 import { GatewayTransport } from './transport.js';
 import { EventDeduplicator, EventMapper } from './events.js';
 import { logFailure } from './errors.js';
+import { captureIncomingCard } from './card-capture.js';
 
 export class AdapterController {
   constructor({ store = new ConfigStore(), host = globalThis.Bot, logger = globalThis.logger, apiFactory = options => new OfficialApi(options), transportFactory = options => new GatewayTransport(options) } = {}) {
@@ -39,7 +40,10 @@ export class AdapterController {
       if (this.dedup.size > 10) this.dedup.delete(this.dedup.keys().next().value);
       const mapper = new EventMapper({ registry, api, config, logger: this.logger, dedup: this.dedup.get(config.appId) });
       const transport = this.transportFactory({ api, config, logger: this.logger,
-        onDispatch: payload => mapper.dispatch(payload),
+        onDispatch: payload => {
+          void captureIncomingCard(payload);
+          return mapper.dispatch(payload);
+        },
         onReady: data => { mapper.platformBotId = typeof data?.user?.id === 'string' ? data.user.id : null; },
         onStatus: status => {
           registry.setOnline(status.state === 'online');

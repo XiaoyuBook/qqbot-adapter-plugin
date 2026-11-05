@@ -6,7 +6,6 @@ import { eventContext } from './context.js';
 import { role } from './group.js';
 import { richSegment } from './rich.js';
 import { incomingMessage } from './incoming.js';
-import { captureIncomingCard } from './card-capture.js';
 
 function groupContent(message, mentions, ownIds, registry, wasMentioned) {
   const known = new Map(), seen = new Set(), parts = [], texts = [];
@@ -143,7 +142,6 @@ export class EventMapper {
       if (incoming.summary.cardSchemas) this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card_details ${JSON.stringify(incoming.summary.cardSchemas)}`);
       if (incoming.summary.ignoredCardSchemas) this.logger?.info?.(`[qqbot-adapter-plugin] incoming_card_schema ${JSON.stringify(incoming.summary.ignoredCardSchemas)}`);
     }
-    if (incoming.summary.mappedCards) void captureIncomingCard(parsed.parts, d.content ?? '');
     eventContext.run({ registry: this.registry, event, reply, scope, target }, () => this.registry.host.emit('message', event));
     return event;
   }
