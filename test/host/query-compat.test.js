@@ -6,10 +6,13 @@ import moment from 'moment';
 import { segment } from 'icqq';
 import { harness, source } from './harness.js';
 import { payload, png } from '../helpers.js';
+import { patchResultNavigationSource, resultNavigationSources } from '../../scripts/prepare-result-navigation-patch.mjs';
 
 async function businessModule(file, dependencies) {
   const context = vm.createContext({ segment, Buffer, console });
-  const module = new vm.SourceTextModule(await source('miao', file), { context });
+  let code = await source('miao', file);
+  if (resultNavigationSources[file]) code = patchResultNavigationSource(file, Buffer.from(code)).toString('utf8');
+  const module = new vm.SourceTextModule(code, { context });
   await module.link(specifier => {
     const values = dependencies[specifier];
     if (!values) throw new Error(`Unexpected query import: ${specifier}`);
@@ -75,4 +78,25 @@ for (const scope of ['group', 'c2c']) test(`real ${scope} ledger statistics omit
   assert.equal(result.messages[0].body.msg_type, scope === 'group' ? 2 : 7); assert.equal(result.messages[0].body.keyboard, undefined);
   if (scope === 'group') assert.match(result.messages[0].body.markdown.content, /^<qqbot-at-user[^\n]+\n!\[图片 #1px #1px\]/);
   assert.equal(result.event.qqbot.lastError, null);
+});
+
+
+test('result navigation migration rejects source drift and keeps other adapters unchanged', async () => {
+  for (const file of Object.keys(resultNavigationSources)) {
+    const original = Buffer.from(await source('miao', file));
+    assert.throws(() => patchResultNavigationSource(file, Buffer.concat([original, Buffer.from('\n// drift')])));
+    assert.throws(() => patchResultNavigationSource(file, patchResultNavigationSource(file, original)));
+  }
+  class Ledger { async ledgerCount() { return { game: 'gs' }; } }
+  const app = await businessModule('plugins/genshin/apps/ledger.js', {
+    '../../../lib/plugins/plugin.js': { default: class {} }, '../model/ledger.js': { default: Ledger },
+    '../../../lib/puppeteer/puppeteer.js': { default: {} }, 'node:fs': { default: {} }
+  });
+  for (const adapter of ['QQBot', 'NapCat', undefined]) {
+    const instance = new app.ledger(), replies = [];
+    instance.e = { adapter }; instance.renderImg = async () => png; instance.reply = message => replies.push(message);
+    await instance.ledgerCount();
+    assert.equal(replies[0].length, adapter === 'QQBot' ? 1 : 2);
+    assert.equal(replies[0][0], png);
+  }
 });

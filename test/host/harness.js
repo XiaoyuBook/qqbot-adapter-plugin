@@ -25,7 +25,7 @@ export async function source(name, file) {
   return value.toString('utf8');
 }
 
-export async function harness(t, { cfgPatch = {}, adapterConfig = {}, userFactory } = {}) {
+export async function harness(t, { cfgPatch = {}, adapterConfig = {}, userFactory, timers = globalThis } = {}) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'qqbot-host-'));
   t.after(() => fs.rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
   const bot = new Client({ log_level: 'off', data_dir: temp });
@@ -38,7 +38,7 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {}, userFactor
   const userIds = [];
   const noteUser = { async create(e) { userIds.push(e.user_id); return userFactory ? userFactory(e) : undefined; } };
   const handler = { has: () => false, call: () => {}, callAll: () => {}, add: () => {} };
-  const context = vm.createContext({ Bot: bot, logger, redis, Buffer, segment, process: { platform: process.platform, cwd: process.cwd.bind(process) }, console, setTimeout, clearTimeout, setInterval, clearInterval });
+  const context = vm.createContext({ Bot: bot, logger, redis, Buffer, segment, process: { platform: process.platform, cwd: process.cwd.bind(process) }, console, setTimeout: timers.setTimeout.bind(timers), clearTimeout: timers.clearTimeout.bind(timers), setInterval, clearInterval });
   context.global = context;
   const modules = new Map();
   function synthetic(id, exports) {
@@ -87,7 +87,7 @@ export async function harness(t, { cfgPatch = {}, adapterConfig = {}, userFactor
     const module = await get(`lib/events/${type}.js`); await module.evaluate();
     const listener = new module.namespace.default(); bot.on(type, event => listener.execute(event));
   }
-  const registry = new AccountRegistry(bot, config(adapterConfig), { segment, logger }); registry.register(); registry.setOnline(true); t.after(() => registry.dispose());
+  const registry = new AccountRegistry(bot, config(adapterConfig), { segment, logger, timers }); registry.register(); registry.setOnline(true); t.after(() => registry.dispose());
   const api = fakeApi(); const mapper = new EventMapper({ registry, api, config: config(adapterConfig), logger });
   async function flush() { await Promise.all(pending.splice(0)); }
 

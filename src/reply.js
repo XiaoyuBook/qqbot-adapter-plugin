@@ -2,14 +2,13 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { AdapterError, logFailure, safeError } from './errors.js';
-import { isForwardMessage, forwardContent } from './forward.js';
-import { prepareMedia, uploadMedia, markdownImageDimensions } from './media.js';
-import { markdown, keyboard, card, keyboardText, isLegacyButton } from './rich.js';
+import { uploadMedia } from './media.js';
+import { keyboardText } from './rich.js';
+import { messageParts, escapeMarkdown } from './message-plan.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { sendReceipt } from './receipts.js';
 
 const optionContext = new AsyncLocalStorage();
-const escapeMarkdown = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#+.!~|])/g, '\\$1');
 
 function imageUrl(value) {
   try {
@@ -45,96 +44,11 @@ export async function imageSource(value, maxBytes) {
   return { file_data: data.toString('base64') };
 }
 
-async function messageParts(message, config, context) {
-  let input = Array.isArray(message) ? message : [message];
-  input = input.flatMap(item => {
-    if (!isForwardMessage(item)) return [item];
-    const forward = forwardContent(item);
-    forward.warnings.forEach(context.warn);
-    return forward.items;
-  });
-  if (input.length > 1000) throw new AdapterError('UNSUPPORTED_MESSAGE');
-  const media = item => Buffer.isBuffer(item) || item instanceof Uint8Array || ['image', 'record', 'audio', 'video', 'file', 'media'].includes(item?.type);
-  const whitespace = item => typeof item === 'string' ? !item.trim() : item?.type === 'text' && typeof item.text === 'string' && !item.text.trim();
-  // Old plugins append navigation to every chart. Keep meaningful prompts and
-  // explicit native keyboards, but do not create a second bubble for that bar.
-  if (input.some(isLegacyButton) && input.some(media) && input.every(item => media(item) || whitespace(item) || isLegacyButton(item) || ['at', 'reply'].includes(item?.type))) {
-    input = input.filter(item => !isLegacyButton(item) && !whitespace(item));
-    context.warn('legacy_navigation_omitted');
-  }
-  const parts = [];
-  let buttons = context.extra?.keyboard ?? context.extra?.button;
-  if (context.extra?.at) input = [{ type: 'at', qq: context.extra.at === true ? context.senderId : context.extra.at }, ...input];
-  let text = '', richText = '', rich = false;
-  function flush() {
-    if (!text && !richText) return;
-    if (rich) parts.push({ body: { msg_type: 2, markdown: markdown(richText) } });
-    else {
-      const chars = Array.from(text);
-      for (let index = 0; index < chars.length; index += 1500) parts.push({ text: chars.slice(index, index + 1500).join('') });
-    }
-    text = ''; richText = ''; rich = false;
-  }
-  function append(value) { text += value; richText += escapeMarkdown(value); }
-  for (const item of input) {
-    if (typeof item === 'string') append(item);
-    else if (item?.type === 'text' && typeof item.text === 'string') append(item.text);
-    else if (item?.type === 'at' && context.senderId && String(item.id ?? item.qq) === context.senderId) {
-      // The passive response is already bound to this sender's trigger. Old QR
-      // plugins add the same @ marker in both group chat and private chat.
-      context.warn(`${context.scope === 'group' ? 'group' : 'private'}_self_mention_omitted`);
-      continue;
-    } else if (item?.type === 'at') {
-      if (context.scope !== 'group') throw new AdapterError('UNSUPPORTED_MESSAGE');
-      context.explicitMention = true;
-      const id = item.id ?? item.qq;
-      if (id === 'all') richText += '<qqbot-at-everyone />';
-      else {
-        const openid = item.openid !== undefined && /^[A-Za-z0-9_-]{1,128}$/.test(item.openid) ? item.openid : context.registry?.openid(id, 'group-user');
-        if (!openid) throw new AdapterError('UNSUPPORTED_MESSAGE');
-        richText += `<qqbot-at-user id="${openid}" />`;
-      }
-      rich = true;
-    } else if (Buffer.isBuffer(item) || item instanceof Uint8Array || ['image', 'record', 'audio', 'video', 'file'].includes(item?.type)) {
-      flush(); const kind = item?.type === 'audio' ? 'record' : item?.type ?? 'image';
-      parts.push({ media: await prepareMedia(kind, item?.type ? (item.file ?? item.url) : item, config, item?.name) });
-    } else if (item?.type === 'media' && typeof item.file_info === 'string' && item.file_info && item.file_info.length <= 65536) {
-      flush(); parts.push({ body: { msg_type: 7, media: { file_info: item.file_info }, content: ' ' } });
-    } else if (item?.type === 'markdown') {
-      flush(); parts.push({ body: { msg_type: 2, markdown: markdown(item.data ?? item.content) } });
-    } else if (item?.type === 'button' || item?.type === 'keyboard') {
-      if (buttons !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
-      buttons = item.data;
-    } else if (item?.type === 'card') { flush(); parts.push({ body: { msg_type: 8, card: card(item.data ?? item.card) } }); }
-    else if (item?.type === 'reply') {
-      if (context.quote !== false && context.quote !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
-      context.quote = { message_id: item.id };
-    } else throw new AdapterError('UNSUPPORTED_MESSAGE');
-  }
-  flush();
-  // A caption and the following image are one QQ media message. This also
-  // avoids consuming two of the platform's five passive replies for one QR.
-  const combined = [];
-  for (const part of parts) {
-    if (part.media && combined.at(-1)?.text !== undefined && !combined.at(-1)?.media) combined.push({ ...part, text: combined.pop().text });
-    else combined.push(part);
-  }
-  if (buttons !== undefined) {
-    const native = keyboard(buttons, context.scope), last = combined.at(-1);
-    if (last?.text !== undefined && !last.media) { last.body = { msg_type: 2, markdown: markdown(escapeMarkdown(last.text.trim()) || '请选择操作'), keyboard: native }; delete last.text; }
-    else if (last?.body?.msg_type === 2) last.body.keyboard = native;
-    else combined.push({ body: { msg_type: 2, markdown: markdown('请选择操作'), keyboard: native } });
-  }
-  if (context.imageMention && !context.explicitMention) for (const part of combined) if (part.media?.fileType === 1) part.mentionFirst = true;
-  if (!combined.length) throw new AdapterError('UNSUPPORTED_MESSAGE');
-  return combined;
-}
-
 function validateOptions(quote, extra) {
   if (quote !== undefined && quote !== null && typeof quote !== 'boolean' && (!quote || typeof quote !== 'object' || Array.isArray(quote) || !Object.keys(quote).some(key => ['message_id', 'id', 'ref_idx'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra !== undefined && (extra === null || typeof extra !== 'object' || Array.isArray(extra) || Object.keys(extra).some(key => !['recallMsg', 'at', 'button', 'keyboard', 'receipt'].includes(key)))) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.recallMsg !== undefined && (!Number.isInteger(extra.recallMsg) || extra.recallMsg < 0 || extra.recallMsg > 120)) throw new AdapterError('UNSUPPORTED_OPTIONS');
-  if (extra?.at !== undefined && typeof extra.at !== 'boolean' && typeof extra.at !== 'string') throw new AdapterError('UNSUPPORTED_OPTIONS');
+  if (extra?.at !== undefined && typeof extra.at !== 'boolean' && typeof extra.at !== 'string' && !(Number.isSafeInteger(extra.at) && extra.at > 0)) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.button !== undefined && extra?.keyboard !== undefined) throw new AdapterError('UNSUPPORTED_OPTIONS');
   if (extra?.receipt !== undefined && typeof extra.receipt !== 'boolean') throw new AdapterError('UNSUPPORTED_OPTIONS');
 }
@@ -223,7 +137,6 @@ export class PassiveReply {
     throw new AdapterError('MESSAGE_UNKNOWN');
   }
   send(message, quote = false, extra) {
-    extra ??= optionContext.getStore()?.reply === this ? optionContext.getStore().extra : undefined;
     return this.#enqueue(async () => {
       const sent = [];
       let total = 0, stage = 'validation';
@@ -232,7 +145,7 @@ export class PassiveReply {
         this.#check();
         validateOptions(quote, extra);
         if (extra?.recallMsg && !this.registry) throw new AdapterError('UNSUPPORTED_OPTIONS');
-        const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, warn: code => this.warn(code), extra, quote,
+        const context = { scope: this.scope, registry: this.registry, senderId: this.senderId, target: this.target, warn: code => this.warn(code), extra, quote,
           imageMention: this.config.mentionBeforeImage && this.scope === 'group' && !this.proactive && this.senderId && extra?.at !== false };
         const parts = await messageParts(message, this.config, context);
         total = parts.length;
@@ -244,20 +157,16 @@ export class PassiveReply {
           let body;
           if (part.media) {
             this.#check();
-            const dimensions = part.mentionFirst && this.registry?.imageReplies && ['png', 'jpg', 'gif', 'webp'].includes(part.media.extension)
-              ? await markdownImageDimensions(part.media) : undefined;
-            if (dimensions) {
-              const id = this.registry.openid(this.senderId, 'group-user');
-              const caption = escapeMarkdown((part.text || '').trim());
+            if (part.image) {
+              const { dimensions, prefix, caption } = part.image;
               stage = 'upload';
               sent.push(await this.registry.imageReplies.send(part.media, async url => {
                 this.#check();
                 const image = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
-                return post({ msg_type: 2, markdown: { content: `<qqbot-at-user id="${id}" />\n${caption ? caption + '\n' : ''}![图片 #${dimensions.width}px #${dimensions.height}px](${image})`, force_verify_image_resource: true } });
+                return post({ msg_type: 2, markdown: { content: prefix + '\n' + (caption ? caption + '\n' : '') + '![图片 #' + dimensions.width + 'px #' + dimensions.height + 'px](' + image + ')', force_verify_image_resource: true } });
               }));
               continue;
             }
-            if (part.mentionFirst) this.warn('image_mention_layout_unavailable');
             stage = 'upload';
             const upload = await uploadMedia(this.api, this.scope, this.target, part.media, () => this.#check());
             if (typeof upload.file_info !== 'string' || !upload.file_info) throw new AdapterError('API_RESPONSE');
@@ -272,23 +181,43 @@ export class PassiveReply {
   }
 }
 
-// Miao wraps e.reply and drops its third argument. Check options before that
-// wrapper runs, so buttons/recall/@ options cannot silently turn into success.
+// Inherit only while delegating through this event's reply wrapper chain.
+// Empty objects and omitted fields preserve inherited options; explicit values
+// (including false and 0) override them. Direct contact sends stay independent.
+function replyOptions(reply, extra) {
+  const inherited = optionContext.getStore();
+  const base = inherited?.reply === reply ? inherited.extra : undefined;
+  if (base === undefined && extra === undefined) return undefined;
+  const result = { ...base };
+  for (const [key, value] of Object.entries(extra ?? {})) if (value !== undefined) {
+    if (key === 'button') delete result.keyboard;
+    if (key === 'keyboard') delete result.button;
+    result[key] = value;
+  }
+  return result;
+}
+
 export function installReply(event, reply) {
   if (event.qqbot) Object.defineProperty(event.qqbot, 'lastReceipt', { enumerable: true, get: () => reply.lastReceipt });
-  const guard = fn => (message, quote = false, extra) => {
-    try { validateOptions(quote, extra); }
-    catch (error) { return reply.fail(error, true, extra?.receipt === true); }
-    const inherited = optionContext.getStore();
-    const effective = extra ?? (inherited?.reply === reply ? inherited.extra : undefined);
-    // The host wrapper drops the third argument and may schedule its own recall.
-    // Carry options through async-local context and let the adapter handle them once.
-    return optionContext.run({ reply, extra: effective }, () => fn(message, quote));
+  const guard = (fn, host = false) => (message, quote = false, extra) => {
+    let effective;
+    try { validateOptions(quote, extra); effective = replyOptions(reply, extra); validateOptions(quote, effective); }
+    catch (error) {
+      const inherited = optionContext.getStore();
+      const detailed = extra?.receipt ?? (inherited?.reply === reply ? inherited.extra?.receipt : undefined);
+      return reply.fail(error, true, detailed === true);
+    }
+    return optionContext.run({ reply, extra: effective }, () => host ? fn(message, quote) : fn(message, quote, effective));
   };
   let current = guard((...args) => reply.send(...args));
   Object.defineProperty(event, 'reply', {
     enumerable: true, configurable: false,
     get: () => current,
-    set: fn => { if (typeof fn === 'function') current = guard(fn); }
+    set: fn => {
+      if (typeof fn !== 'function') return;
+      // The Miao Loader hands off the previous function via replyNew. Only
+      // that boundary must avoid the host's duplicate @ and recall processing.
+      current = guard(fn, event.replyNew === current);
+    }
   });
 }

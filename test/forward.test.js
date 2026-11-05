@@ -50,7 +50,8 @@ test('nested forwards are snapshots and other-user mentions and invalid images p
   const nested = await makeForwardMsg(source); source.message = 'changed';
   const forward = await makeForwardMsg({ message: [nested, { type: 'at', qq: e.user_id }, 'tail'] });
   const result = await e.reply(forward);
-  assert.ok(result.message_id); assert.match(f.api.calls[0].body.content, /original/); assert.doesNotMatch(f.api.calls[0].body.content, /changed/);
+  assert.ok(result.message_id); assert.match(f.api.calls[0].body.markdown.content, /original/); assert.doesNotMatch(f.api.calls[0].body.markdown.content, /changed/);
+  assert.match(f.api.calls[0].body.markdown.content, /<qqbot-at-user/);
   const bad = await makeForwardMsg({ message: ['should not send', { type: 'at', qq: 'other' }] });
   assert.equal(await e.reply(bad), false); assert.equal(f.api.calls.length, 2); // Only the single safe feedback.
   assert.equal(f.api.calls.some(call => call.body.content?.includes('should not send')), false);

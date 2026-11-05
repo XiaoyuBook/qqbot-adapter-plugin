@@ -2,6 +2,8 @@ import { AdapterError } from './errors.js';
 
 // A local compatibility envelope, never a native QQ forward/XML message.
 const contents = new WeakMap();
+const boundary = Symbol('forward-node-boundary');
+export const isForwardBoundary = value => value === boundary;
 const MAX_NODES = 100, MAX_ITEMS = 1000, MAX_TEXT = 64000, MAX_DEPTH = 8;
 
 function invalid() { throw new AdapterError('FORWARD_INVALID'); }
@@ -78,7 +80,8 @@ export async function makeForwardMsg(input) {
       const nested = forwardContent(message);
       nested.warnings.forEach(code => warnings.add(code));
       append(nested.items, depth + 1);
-    } else if (typeof message === 'string') add(message);
+    } else if (isForwardBoundary(message)) add(message);
+    else if (typeof message === 'string') add(message);
     else if (message?.type === 'text' && typeof message.text === 'string') add(message.text);
     else if (Buffer.isBuffer(message) || message instanceof Uint8Array) add(message);
     else if (['image', 'record', 'audio', 'video', 'file'].includes(message?.type)) add({ type: message.type, file: message.file ?? message.url, name: message.name });
@@ -93,7 +96,7 @@ export async function makeForwardMsg(input) {
   }
   for (const [index, node] of nodes.entries()) {
     if (!node || typeof node !== 'object' || !Object.hasOwn(node, 'message')) invalid();
-    if (index) add('\n\n');
+    if (index) add(boundary);
     if (nodes.length > 1) {
       const name = node.nickname;
       if (name !== undefined && typeof name !== 'string') invalid();

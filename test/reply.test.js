@@ -40,12 +40,17 @@ test('boolean quote fallback and native recall options survive the Miao wrapper'
   const ok = await e.reply('plain', false, {}); assert.ok(ok.message_id); assert.equal(f.api.calls.at(-1).body.content, 'plain');
   await timers.tick(1000); assert.equal(f.api.calls.at(-1).method, 'DELETE'); f.registry.dispose();
 });
-test('legacy self mention works in both scopes; invalid IDs fail and group all is native', async () => {
+test('explicit group self mention stays visible; private self mention degrades and invalid IDs fail', async () => {
   for (const scope of ['c2c', 'group']) {
     const f = fixture(); const e = await f.mapper.dispatch(payload(scope));
     const result = await e.reply([{ type: 'at', qq: 0, id: e.user_id }, 'QR', { type: 'image', file: png }]);
-    assert.ok(result.message_id); assert.deepEqual(result.warnings, [`${scope === 'group' ? 'group' : 'private'}_self_mention_omitted`]);
-    assert.equal(f.api.calls[1].body.content, 'QR'); assert.equal(f.api.calls[1].body.msg_id, 'trigger-id');
+    assert.ok(result.message_id);
+    const message = f.api.calls.find(call => call.route.endsWith('/messages'));
+    assert.equal(message.body.msg_id, 'trigger-id');
+    if (scope === 'group') {
+      assert.equal(result.warnings, undefined); assert.equal(result.total_parts, 1);
+      assert.match(message.body.markdown.content, /^<qqbot-at-user[^\n]+\nQR\n!\[图片/);
+    } else { assert.deepEqual(result.warnings, ['private_self_mention_omitted']); assert.equal(message.body.content, 'QR'); }
     assert.equal(await e.reply([{ type: 'at', qq: 'other-user' }, 'no']), false);
     const everyone = await e.reply([{ type: 'at', qq: 'all' }, 'announcement']);
     if (scope === 'group') { assert.ok(everyone.message_id); assert.match(f.api.calls.at(-1).body.markdown.content, /<qqbot-at-everyone \/>/); }

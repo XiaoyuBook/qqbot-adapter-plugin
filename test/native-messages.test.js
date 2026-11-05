@@ -102,13 +102,13 @@ test('legacy segment bridge produces native buttons only in this adapter event a
   assert.equal(segment.button(), 'legacy no-op'); f.registry.dispose(); assert.equal(segment.button, original);
 });
 
-test('legacy navigation attached to media results omits its whitespace and extra reply', async t => {
+test('explicit navigation opt-out omits its whitespace and extra reply', async t => {
   const segment = { button: () => '' }, f = fixture({}, { segment }), pending = [];
   t.after(() => f.registry.dispose());
   f.bot.on('message', e => pending.push(e.reply([
     { type: 'image', file: png }, '\n\n',
     segment.button([{ text: '记录', callback: '#原石' }, { text: '统计', callback: '#原石统计' }])
-  ])));
+  ], false, { button: false })));
   await f.mapper.dispatch(payload()); await Promise.all(pending);
   const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
   assert.equal(messages.length, 1); assert.equal(messages[0].body.msg_type, 7);

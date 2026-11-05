@@ -1,5 +1,5 @@
 import { eventContext } from './context.js';
-import { richSegment, legacyButton } from './rich.js';
+import { richSegment } from './rich.js';
 
 const bridgeKey = Symbol.for('qqbot-adapter-plugin.segment-bridge.v1');
 export function acquireSegmentBridge(registry, segment = globalThis.segment) {
@@ -12,7 +12,7 @@ export function acquireSegmentBridge(registry, segment = globalThis.segment) {
       const original = segment[name];
       const wrapper = function (...args) {
         const current = eventContext.getStore();
-        if (current?.registry && state.owners.has(current.registry)) return name === 'button' ? legacyButton(...args) : richSegment[name](...args);
+        if (current?.registry && state.owners.has(current.registry)) return richSegment[name](...args);
         return original.apply(this, args);
       };
       state.methods.set(name, { original, wrapper }); segment[name] = wrapper;

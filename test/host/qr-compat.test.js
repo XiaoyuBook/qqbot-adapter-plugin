@@ -65,9 +65,12 @@ for (const scope of ['c2c', 'group']) test(`actual ${scope} QR handler, renderer
   const event = await f.mapper.dispatch(payload(scope, { content: '#扫码绑定' })); await f.flush();
   assert.equal(runs, 1); assert.equal(timers.length, 1);
   const messages = f.api.calls.filter(call => call.route.endsWith('/messages'));
-  assert.equal(messages.length, 2); assert.equal(messages[0].body.msg_type, 0); assert.equal(messages[1].body.msg_type, 7);
-  assert.equal(messages[1].body.content.includes('请扫码'), true);
-  assert.equal(event.qqbot.compatibility.includes(`${scope === 'group' ? 'group' : 'private'}_self_mention_omitted`), true);
+  assert.equal(messages.length, 2); assert.equal(messages[0].body.msg_type, 0); assert.equal(messages[1].body.msg_type, scope === 'group' ? 2 : 7);
+  if (scope === 'group') {
+    assert.match(messages[1].body.markdown.content, /^<qqbot-at-user[^\n]+\n/);
+    assert.ok(messages[1].body.markdown.content.includes('请扫码'));
+    assert.equal(event.qqbot.compatibility.includes('group_self_mention_omitted'), false);
+  } else { assert.ok(messages[1].body.content.includes('请扫码')); assert.ok(event.qqbot.compatibility.includes('private_self_mention_omitted')); }
   assert.equal(event.qqbot.compatibility.includes('quote_display_unavailable'), true);
   assert.equal(event.qqbot.lastError, null);
   assert.equal(renders.length, 1); assert.equal(renders[0].name, 'xiaoyao-cvs-plugin/qrCode/index');
