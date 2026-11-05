@@ -147,7 +147,9 @@ export class OfficialApi {
     if (!['application/octet-stream', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(contentType)) throw new AdapterError('MEDIA_INVALID');
     if (this.#closed) throw new AdapterError('OFFLINE');
     const controller = new AbortController(); this.#controllers.add(controller);
-    const timer = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+    // Large presigned PUTs can outlast the normal JSON request deadline.
+    const timeoutMs = bytes.byteLength > 4 * 1024 * 1024 ? Math.max(this.config.requestTimeoutMs, 60000) : this.config.requestTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       // Presigned URLs receive only the media bytes, never the bot token.
       const response = await this.fetch(url.href, { method: 'PUT', body: bytes, headers: { 'Content-Type': contentType }, redirect: 'error', signal: controller.signal });

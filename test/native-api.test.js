@@ -61,3 +61,46 @@ test('COS upload sends bytes and MIME only, rejects redirects and unapproved hos
   for (const url of ['http://unit.myqcloud.com/a', 'https://127.0.0.1/a', 'https://myqcloud.com.evil.test/a', 'https://user:pass@unit.myqcloud.com/a']) await assert.rejects(api.uploadPart(url, bytes), { code: 'MEDIA_INVALID' });
   assert.equal(calls.length, 1); api.close();
 });
+
+test('a large presigned upload can finish after the JSON request timeout', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal;
+  const api = new OfficialApi({ config: config({ requestTimeoutMs: 15000 }), appSecret: 'FAKE_SECRET', fetchImpl: async (_url, init) => {
+    signal = init.signal;
+    return new Promise((resolve, reject) => {
+      setTimeout(() => resolve(new Response(null, { status: 200 })), 20000);
+      signal.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+  } });
+  t.after(() => api.close());
+  const pending = api.uploadPart('https://unit.myqcloud.com/upload', Buffer.alloc(10 * 1024 * 1024));
+  t.mock.timers.tick(15001); assert.equal(signal.aborted, false);
+  t.mock.timers.tick(4999); await pending;
+  assert.equal(signal.aborted, false);
+});
+
+test('presigned upload deadlines remain bounded, honor longer configuration and keep small uploads unchanged', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const [requestTimeoutMs, size, deadline] of [[15000, 10 * 1024 * 1024, 60000], [90000, 10 * 1024 * 1024, 90000], [15000, 1024, 15000]]) {
+    let signal;
+    const api = new OfficialApi({ config: config({ requestTimeoutMs }), appSecret: 'FAKE_SECRET', fetchImpl: async (_url, init) => {
+      signal = init.signal;
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    } });
+    const pending = assert.rejects(api.uploadPart('https://unit.myqcloud.com/upload', Buffer.alloc(size)), { code: 'API_NETWORK' });
+    t.mock.timers.tick(deadline - 1); assert.equal(signal.aborted, false);
+    t.mock.timers.tick(1); await pending; assert.equal(signal.aborted, true);
+    api.close();
+  }
+});
+
+test('closing the API still aborts a large media upload immediately', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal;
+  const api = new OfficialApi({ config: config(), appSecret: 'FAKE_SECRET', fetchImpl: async (_url, init) => {
+    signal = init.signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  } });
+  const pending = assert.rejects(api.uploadPart('https://unit.myqcloud.com/upload', Buffer.alloc(10 * 1024 * 1024)), { code: 'API_NETWORK' });
+  api.close(); await pending; assert.equal(signal.aborted, true);
+});
