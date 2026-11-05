@@ -11,14 +11,14 @@ async function fixture(t) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return { directory, now: () => 1000 };
 }
-async function request(f, value = { requestedAt: 1000, expiresAt: 301000 }) {
+async function request(f, value = { requestedAt: 1000, expiresAt: 86401000 }) {
   await fs.writeFile(path.join(f.directory, 'card-diagnostic-request.json'), JSON.stringify(value));
 }
 
 test('card capture is disabled by default and rejects invalid or expired requests', async t => {
   const f = await fixture(t);
   assert.equal(await captureIncomingCard(message, '', f), false);
-  for (const value of [{}, { requestedAt: 1001, expiresAt: 2000 }, { requestedAt: 0, expiresAt: 1000 }, { requestedAt: 1000, expiresAt: 301001 }, { requestedAt: 1000, expiresAt: '2000' }]) {
+  for (const value of [{}, { requestedAt: 1001, expiresAt: 2000 }, { requestedAt: 0, expiresAt: 1000 }, { requestedAt: 1000, expiresAt: 86401001 }, { requestedAt: 1000, expiresAt: '2000' }]) {
     await request(f, value); assert.equal(await captureIncomingCard(message, '', f), false);
   }
   assert.deepEqual((await fs.readdir(f.directory)), ['card-diagnostic-request.json']);
@@ -55,4 +55,14 @@ test('sample strings are copied before asynchronous IO so consumers may mutate t
   assert.equal(await pending, true);
   const result = JSON.parse(await fs.readFile(path.join(f.directory, 'card-diagnostic-result.json'), 'utf8'));
   assert.deepEqual(result.cards, [JSON.parse(message[0].data)]);
+});
+
+
+test('an explicitly armed sample remains available after a delayed test and disarms immediately after capture', async t => {
+  const f = await fixture(t); await request(f);
+  f.now = () => 1000 + 35 * 60 * 1000;
+  assert.equal(await captureIncomingCard(message, '', f), true);
+  assert.deepEqual(await fs.readdir(f.directory), ['card-diagnostic-result.json']);
+  await fs.unlink(path.join(f.directory, 'card-diagnostic-result.json'));
+  assert.equal(await captureIncomingCard(message, '', f), false);
 });
