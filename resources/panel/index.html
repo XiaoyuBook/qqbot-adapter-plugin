@@ -4,45 +4,95 @@
 <meta charset="utf-8">
 <title>{{title}}</title>
 <style>
+:root { --ink: #173655; --muted: #526c86; --blue: #2c73cc; --line: #afcdeb; }
 * { box-sizing: border-box; }
-body { margin: 0; width: 960px; color: #21354a; background: #edf3f8; font: 23px/1.55 "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
-.container { width: 960px; padding: 42px; background: linear-gradient(145deg, #e9f3fc, #f6f8fb 52%, #eff5f4); }
-.header { padding: 0 4px 27px; border-bottom: 2px solid #c9d9e6; margin-bottom: 26px; }
-.brand { color: #34749a; font-size: 18px; font-weight: 700; letter-spacing: 3px; margin-bottom: 8px; }
-h1 { font-size: 46px; line-height: 1.25; letter-spacing: 1px; margin: 0 0 12px; color: #163652; }
-.subtitle { color: #52677a; font-size: 21px; }
-.version { display: inline-block; margin-left: 14px; background: #dcecf7; color: #286187; padding: 3px 12px; font-size: 20px; vertical-align: middle; border-radius: 8px; letter-spacing: 0; }
-h2 { font-size: 27px; margin: 0 0 18px; color: #246080; }
-.section { border-radius: 16px; border: 1px solid #d5e0e9; background: #fff; padding: 24px 27px; margin-bottom: 22px; }
-.commands { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 28px; }
-.command { font-size: 23px; font-weight: 700; color: #214c6d; overflow-wrap: anywhere; }
-.description { margin-top: 6px; font-size: 21px; color: #526579; }
-.status { font-size: 22px; padding: 14px 22px; background: #e1edf5; border-radius: 12px; margin-bottom: 22px; }
-.settings { padding: 8px 27px; }
-.setting { padding: 17px 0; border-bottom: 1px solid #e2e9ef; }
-.setting:last-child { border-bottom: 0; }
-.row { display: flex; align-items: center; gap: 18px; justify-content: space-between; }
-.name { font-size: 25px; font-weight: 700; }
-.usage { color: #63778b; font-size: 20px; margin-left: 14px; font-weight: 400; }
-.value { color: #5b6e7d; background: #edf1f5; border-radius: 8px; padding: 2px 14px; font-size: 22px; white-space: nowrap; }
-.value.on { color: #176a50; background: #dff1e9; }
-.value.numeric { color: #255b87; background: #e5eff8; }
-.note { font-size: 20px; color: #5b6e7e; margin-top: 5px; }
-.tips { border-left: 4px solid #75a9c5; padding: 2px 0 2px 20px; margin: 24px 3px 16px; color: #4d6478; font-size: 21px; }
-.tip { margin: 9px 0; }
-.footer { padding-top: 18px; color: #728496; font-size: 18px; text-align: center; }
+body { margin: 0; width: 960px; color: var(--ink); background: #edf4fb; font: 22px/1.5 "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+.container { width: 960px; padding: 28px; background: linear-gradient(135deg, #e5f1ff, #f4f8fd 55%, #e7f2fc); }
+.panel { border: 1px solid #91b9e2; border-radius: 20px; overflow: hidden; }
+.content { padding: 22px 20px 0; }
+.header { margin: 0 12px 20px; }
+.title-line { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
+h1 { font-size: 46px; line-height: 1.25; margin: 0 0 10px; letter-spacing: 1px; color: #102e4c; }
+.version { font-size: 24px; font-weight: 700; color: var(--blue); white-space: nowrap; }
+.subtitle { font-size: 23px; }
+.quick-start { display: flex; align-items: center; gap: 24px; padding: 18px 22px; margin-bottom: 18px; color: #fff; background: #173b60; border-radius: 12px; }
+.quick-command { font-size: 27px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; }
+.quick-description { font-size: 19px; color: #d8e8fa; border-left: 1px solid #91afcc; padding-left: 24px; }
+.status { display: flex; align-items: center; gap: 14px; padding: 12px 22px; margin: -10px 0 22px; background: #d7e8f8; border-radius: 10px; font-size: 22px; }
+.status-dot { width: 12px; height: 12px; border-radius: 50%; background: #8293a5; }
+.status-dot.online { background: #26a675; }
+.status-caption { color: var(--muted); font-size: 19px; margin-left: auto; }
+.section { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,.75); }
+.section-heading { display: flex; align-items: center; gap: 14px; padding: 10px 17px; background: #dcecff; }
+.number { display: inline-block; padding: 0 10px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 24px; font-weight: 700; }
+h2 { font-size: 29px; line-height: 1.35; margin: 0; }
+.permission { margin-left: auto; font-size: 20px; color: #365977; }
+.commands, .settings { padding: 0 17px; }
+.command-row { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: center; padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.command-row:last-child, .setting:last-child { border-bottom: 0; }
+.command { font-size: 23px; font-weight: 700; overflow-wrap: anywhere; }
+.description { font-size: 21px; color: #3f5c79; overflow-wrap: anywhere; }
+.setting { padding: 10px 6px; border-bottom: 1px solid var(--line); }
+.setting-line { display: grid; grid-template-columns: 190px 1fr auto; gap: 18px; align-items: center; }
+.name { font-size: 24px; font-weight: 700; }
+.details { font-size: 18px; color: var(--muted); }
+.example { margin-top: 3px; font-size: 19px; color: #284f78; overflow-wrap: anywhere; }
+.value { color: #3d5974; background: #dfebf7; border-radius: 8px; padding: 3px 13px; font-size: 22px; font-weight: 700; white-space: nowrap; }
+.value.on { color: #186747; background: #d8f2e4; }
+.value.numeric { color: #215fa4; background: #dfedff; }
+.note { margin-top: 7px; color: var(--muted); font-size: 19px; }
+.tips { display: flex; gap: 22px; align-items: center; padding: 15px 20px; margin: 4px 0 20px; border: 1px solid var(--line); border-radius: 14px; background: #e0edfc; }
+.tips h2 { flex: 0 0 110px; font-size: 25px; }
+.tip-list { border-left: 1px solid #8db6df; padding-left: 22px; flex: 1; }
+.tip { font-size: 19px; margin: 5px 0; overflow-wrap: anywhere; }
+.footer { padding: 15px 20px; background: #d5e7f8; text-align: center; font-size: 19px; color: #335777; }
 </style>
 </head>
-<body><div class="container">
-<header class="header"><div class="brand">QQBOT ADAPTER</div><h1>{{title}}<span class="version">v{{version}}</span></h1><div class="subtitle">{{subtitle}}</div></header>
+<body>
+<div class="container"><div class="panel">
+<main class="content">
+<header class="header">
+  <div class="title-line"><h1>{{title}}</h1><span class="version">v{{version}}</span></div>
+  <div class="subtitle">{{subtitle}}</div>
+</header>
+<div class="quick-start">
+  <div class="quick-command">{{quickCommand}}</div>
+  <div class="quick-description">{{quickDescription}}</div>
+</div>
 {{if mode === 'settings'}}
-<div class="status">连接状态：{{connection}} · 当前为本地配置值</div>
-<section class="section settings">
-{{each rows row}}<div class="setting"><div class="row"><div class="name">{{row.name}}<span class="usage">{{row.usage}}</span></div><div class="value {{if row.enabled}}on{{/if}} {{if row.numeric}}numeric{{/if}}">{{row.value}}</div></div>{{if row.note}}<div class="note">{{row.note}}</div>{{/if}}</div>{{/each}}
+<div class="status"><span>连接状态</span><span class="status-dot {{if online}}online{{/if}}"></span><strong>{{connection}}</strong><span class="status-caption">以下为本地配置值</span></div>
+{{each groups group index}}
+<section class="section">
+  <div class="section-heading"><span class="number">0{{index + 1}}</span><h2>{{group.title}}</h2></div>
+  <div class="settings">
+  {{each group.rows row}}
+    <div class="setting">
+      <div class="setting-line">
+        <div class="name">{{row.name}}</div>
+        <div><div class="details">默认 {{row.defaultValue}} · {{row.usage}}</div><div class="example">{{row.example}}</div></div>
+        <div class="value {{if row.enabled}}on{{/if}} {{if row.numeric}}numeric{{/if}}">{{row.value}}</div>
+      </div>
+      {{if row.note}}<div class="note">{{row.note}}</div>{{/if}}
+    </div>
+  {{/each}}
+  </div>
 </section>
+{{/each}}
 {{else}}
-{{each sections section}}<section class="section"><h2>{{section.title}}</h2><div class="commands">{{each section.items item}}<div><div class="command">{{item.command}}</div><div class="description">{{item.description}}</div></div>{{/each}}</div></section>{{/each}}
+{{each sections section index}}
+<section class="section">
+  <div class="section-heading"><span class="number">0{{index + 1}}</span><h2>{{section.title}}</h2><span class="permission">{{section.permission}}</span></div>
+  <div class="commands">
+  {{each section.items item}}
+    <div class="command-row"><div class="command">{{item.command}}</div><div class="description">{{item.description}}</div></div>
+  {{/each}}
+  </div>
+</section>
+{{/each}}
 {{/if}}
-<div class="tips">{{each notices notice}}<div class="tip">{{notice}}</div>{{/each}}</div>
-<footer class="footer">qqbot-adapter-plugin · 使用 #QQBot帮助 / #QQBot设置</footer>
-</div></body></html>
+<aside class="tips"><h2>使用提示</h2><div class="tip-list">{{each notices notice}}<div class="tip">{{notice}}</div>{{/each}}</div></aside>
+</main>
+<footer class="footer">qqbot-adapter-plugin · v{{version}}</footer>
+</div></div>
+</body>
+</html>

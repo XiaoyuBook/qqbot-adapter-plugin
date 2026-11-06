@@ -15,6 +15,7 @@ const cfg = patch => config({ masterGroupOpenids: [master], ...patch });
 
 test('settings parser accepts documented forms, aliases and per-item defaults', () => {
   assert.deepEqual(parseSettingsCommand('#QQBot设置'), { type: 'view' });
+  for (const suffix of ['帮助', '列表']) assert.deepEqual(parseSettingsCommand('#QQBot设置' + suffix), { type: 'view' });
   assert.equal(parseSettingsCommand(' #qqbot设置 免艾特 开启 ').patch.receiveGroupMessages, true);
   assert.equal(parseSettingsCommand('#QQ机器人设置图片@关闭').patch.mentionBeforeImage, false);
   assert.equal(parseSettingsCommand('#QQBot设置请求超时30').patch.requestTimeoutMs, 30000);
@@ -22,8 +23,35 @@ test('settings parser accepts documented forms, aliases and per-item defaults', 
   for (const item of chatSettings) assert.equal(parseSettingsCommand('#QQBot设置' + item.name + '默认').patch[item.key], defaults[item.key]);
   assert.equal(parseSettingsCommand('#其他设置'), null);
 });
+test('all setting examples, shorthand, explicit units and queries match the same definitions', () => {
+  for (const item of chatSettings) {
+    for (const name of [item.name, ...(item.aliases || [])]) {
+      assert.deepEqual(parseSettingsCommand('#QQBot设置' + name), { type: 'query', item });
+      assert.equal(parseSettingsCommand('#QQBot设置' + name + '恢复默认').patch[item.key], defaults[item.key]);
+      if (item.factor) {
+        for (const number of [item.min, item.max]) {
+          assert.equal(parseSettingsCommand('#QQBot设置 ' + name + ' ' + number + ' ' + item.unit.toLowerCase()).patch[item.key], number * item.factor);
+        }
+      } else {
+        for (const value of ['开启', '开', '启用', '关闭', '关', '禁用']) {
+          assert.equal(parseSettingsCommand('#QQBot设置' + name + value).patch[item.key], ['开启', '开', '启用'].includes(value));
+        }
+        for (const value of ['1', '0', 'true']) assert.equal(parseSettingsCommand('#QQBot设置' + name + value).type, 'invalid');
+      }
+    }
+  }
+  const panel = settingsPanel(defaults);
+  assert.deepEqual(panel.groups.map(group => group.rows.length), [5, 3, 3]);
+  for (const row of panel.rows) {
+    const parsed = parseSettingsCommand(row.example);
+    assert.equal(parsed.type, 'set');
+    assert.equal(parsed.item.name, row.name);
+    assert.equal(parsed.patch[parsed.item.key], parsed.item.factor ? defaults[parsed.item.key] : true);
+    assert.ok(panelText({ ...panel, version: 'test' }).includes(row.example));
+  }
+});
 test('invalid input cannot write arbitrary keys, accept prototype values, or leak submitted text', () => {
-  for (const suffix of ['免艾特constructor', '图片艾特toString', '群回复窗口0', '群回复窗口301', '私聊回复窗口3601', '回复次数6', '请求超时1.5', '请求超时1e2', '图片上限201', '媒体上限-1', 'appSecret SECRET_SENTINEL', '__proto__ 开启']) {
+  for (const suffix of ['免艾特constructor', '图片艾特toString', '群回复窗口0', '群回复窗口301', '私聊回复窗口3601', '回复次数6', '请求超时1.5', '请求超时1e2', '图片上限201', '媒体上限-1', '请求超时30次', '回复次数3秒', '图片上限8MB', '图片上限8MiB多余', '群回复窗口999999999999999999999秒', 'appSecret SECRET_SENTINEL', '__proto__ 开启']) {
     const result = parseSettingsCommand('#QQBot设置' + suffix);
     assert.equal(result.type, 'invalid', suffix);
     assert.equal(result.message.includes('SECRET_SENTINEL'), false);
@@ -45,15 +73,40 @@ test('panel data and text include only allowed settings, never account identity 
   assert.equal(JSON.stringify(data).includes(secret), false);
   assert.equal(panelText({ ...data, version: 'test' }).includes(secret), false);
   assert.equal(settingsPanel(defaults, { state: secret }).connection, '状态未知');
+  assert.equal(settingsPanel(defaults, { state: 'constructor' }).connection, '状态未知');
+  const single = settingsPanel(defaults, { state: 'disabled' }, chatSettings[0]);
+  assert.equal(single.rows.length, 1); assert.equal(single.groups.length, 1);
+  assert.equal(single.rows[0].name, '免艾特'); assert.equal(single.online, false);
+  assert.ok(single.notices.some(text => text.includes('#QQBot设置免艾特默认')));
 });
 test('help image uses host renderer and the existing reply path exactly once', async () => {
   const replies = [], image = { type: 'image', file: 'base64://VALID_IMAGE' };
   const e = { runtime: { async render(plugin, template, data, options) {
     assert.equal(plugin, 'qqbot-adapter-plugin'); assert.equal(template, 'panel/index');
-    assert.equal(data.mode, 'help'); assert.equal(options.retType, 'base64');
+    assert.equal(data.mode, 'help'); assert.equal(data.imgType, 'png'); assert.equal(options.retType, 'base64');
     return image;
   } }, reply: async value => { replies.push(value); return { message_id: 'sent' }; } };
   await replyPanel(e, helpPanel()); assert.deepEqual(replies, [image]);
+});
+test('concurrent panels finish reading the shared host template before the next render writes it', async () => {
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const firstStarted = new Promise(resolve => { started = resolve; });
+  const rendered = [], replied = [];
+  const event = { runtime: { async render(plugin, path, data) {
+    rendered.push(data.title);
+    if (rendered.length === 1) { started(); await gate; throw Error('RENDER_FAILURE'); }
+    return { type: 'image', title: data.title };
+  } }, reply: async value => { replied.push(value); return true; } };
+  const first = replyPanel(event, settingsPanel(defaults));
+  await firstStarted;
+  const second = replyPanel(event, settingsPanel(defaults, {}, chatSettings[0]));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(rendered, ['适配器设置']);
+  release(); await Promise.all([first, second]);
+  assert.deepEqual(rendered, ['适配器设置', '免艾特设置']);
+  assert.ok(replied.some(value => typeof value === 'string' && value.includes('适配器设置')));
+  assert.ok(replied.some(value => value.title === '免艾特设置'));
 });
 test('renderer absence or failure and rejected image send fall back to usable text', async () => {
   for (const render of [undefined, async () => { throw Error('PRIVATE_RENDER_ERROR'); }, async () => false, async () => ({ type: 'image' })]) {
@@ -121,4 +174,14 @@ test('direct command handler enforces owner checks before viewing or saving sett
   const commands = new Commands();
   await commands.settings(event({ isMaster: false, msg: '#QQBot设置免艾特开启', reply: async value => replies.push(value) }));
   assert.equal(reads, 1); assert.equal(changes, 0); assert.deepEqual(replies, []);
+});
+test('single-item queries return current values without a controller or writes', async () => {
+  const sent = [];
+  const Plugin = class { constructor(options) { Object.assign(this, options); } };
+  const Commands = createCommandPlugin(Plugin, { getRuntime: () => ({ store: { read: async () => ({ config: cfg({ requestTimeoutMs: 30000 }) }) } }) });
+  await new Commands().settings(event({ msg: '#QQBot设置请求超时', reply: async value => sent.push(value) }));
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].includes('请求超时：30 秒'));
+  assert.ok(sent[0].includes('默认 15 秒'));
+  assert.equal(sent[0].includes('群回复窗口'), false);
 });

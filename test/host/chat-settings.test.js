@@ -22,8 +22,16 @@ test('real Miao command routing: help is public, settings require trusted QQBot 
   assert.ok((await send('#QQBot帮助', 'ordinary-user'))[0].body.content.includes('QQBot 使用帮助'));
   assert.ok((await send('#QQBot设置', 'ordinary-user'))[0].body.content.includes('只有主人'));
   assert.ok((await send('#QQBot设置免艾特开启', 'ordinary-user'))[0].body.content.includes('只有主人')); assert.equal(edits.length, 0);
+  assert.ok((await send('#QQBot设置免艾特', 'ordinary-user'))[0].body.content.includes('只有主人'));
   assert.ok((await send('#QQBot设置'))[0].body.content.includes('连接：已连接'));
   assert.ok((await send('#qqbot设置 免艾特 开启'))[0].body.content.includes('已保存'));
   assert.deepEqual(edits, [{ receiveGroupMessages: true }]);
+  assert.ok((await send('#QQBot设置请求超时'))[0].body.content.includes('默认 15 秒'));
+  assert.equal(edits.length, 1);
+  assert.ok((await send('#QQBot设置请求超时30秒'))[0].body.content.includes('已保存'));
+  assert.ok((await send('#QQ机器人设置免@关'))[0].body.content.includes('已保存'));
+  assert.deepEqual(edits.slice(1), [{ requestTimeoutMs: 30000 }, { receiveGroupMessages: false }]);
+  assert.ok((await send('#QQBot设置列表'))[0].body.content.includes('资源限制'));
+  assert.ok((await send('#QQBot help', 'ordinary-user'))[0].body.content.includes('QQBot 使用帮助'));
   assert.deepEqual(await send('#角色记录'), []);
 });

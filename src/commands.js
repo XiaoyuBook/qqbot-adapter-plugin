@@ -3,12 +3,16 @@ import { pluginVersion } from './metadata.js';
 import { canManageSettings, helpPanel, settingsPanel, parseSettingsCommand, settingValue, panelText } from './chat-settings.js';
 import { safeError, logFailure } from './errors.js';
 
+let renderQueue = Promise.resolve();
+
 export async function replyPanel(event, panel) {
-  const data = { ...panel, version: pluginVersion, saveId: panel.mode };
+  const data = { ...panel, version: pluginVersion, saveId: panel.mode, imgType: 'png' };
   let image;
   try {
-    // Return the segment, then send once through the usual adapter reply path.
-    image = await event.runtime?.render('qqbot-adapter-plugin', 'panel/index', data, { retType: 'base64' });
+    // The host writes a shared file per saveId. Finish each render before replacing it.
+    const rendering = renderQueue.then(() => event.runtime?.render('qqbot-adapter-plugin', 'panel/index', data, { retType: 'base64' }));
+    renderQueue = rendering.catch(() => {});
+    image = await rendering;
   } catch { globalThis.logger?.warn?.('[qqbot-adapter-plugin] panel_render_failed'); }
   if (image) {
     try {
@@ -26,8 +30,8 @@ export function createCommandPlugin(Plugin, { getRuntime = runtime } = {}) {
     constructor() {
       super({ name: 'QQBot帮助与设置', dsc: 'QQ 官方机器人适配器帮助和主人设置', event: 'message', priority: -100,
         rule: [
-          { reg: /^#(?:QQBot|QQ机器人)(?:帮助|help)$/i, fnc: 'help', log: false },
-          { reg: /^#(?:QQBot|QQ机器人)设置[\s\S]*$/i, fnc: 'settings', permission: 'master', log: false }
+          { reg: /^\s*#(?:QQBot|QQ机器人)\s*(?:帮助|help)\s*$/i, fnc: 'help', log: false },
+          { reg: /^\s*#(?:QQBot|QQ机器人)设置[\s\S]*$/i, fnc: 'settings', permission: 'master', log: false }
         ]
       });
     }
@@ -39,7 +43,7 @@ export function createCommandPlugin(Plugin, { getRuntime = runtime } = {}) {
         if (!canManageSettings(event, config)) return true;
         const command = parseSettingsCommand(event.msg);
         if (!command) return false;
-        if (command.type === 'view') return await replyPanel(event, settingsPanel(config, state.controller?.status));
+        if (command.type === 'view' || command.type === 'query') return await replyPanel(event, settingsPanel(config, state.controller?.status, command.item));
         if (command.type === 'invalid') { await event.reply(command.message); return true; }
         if (!state.controller) { await event.reply('适配器运行时尚未初始化，请稍后重试。'); return true; }
         await state.controller.configure(command.patch, {
