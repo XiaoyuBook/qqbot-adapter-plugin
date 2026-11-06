@@ -27,11 +27,15 @@ h1 { font-size: 46px; line-height: 1.25; margin: 0 0 10px; letter-spacing: 1px; 
 .number { display: inline-block; padding: 0 10px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 24px; font-weight: 700; }
 h2 { font-size: 29px; line-height: 1.35; margin: 0; }
 .permission { margin-left: auto; font-size: 20px; color: #365977; }
-.commands, .settings { padding: 0 17px; }
-.command-row { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: center; padding: 12px 6px; border-bottom: 1px solid var(--line); }
-.command-row:last-child, .setting:last-child { border-bottom: 0; }
+.settings { padding: 0 17px; }
+.commands { display: grid; grid-template-columns: 1fr 1fr; }
+.command-row { min-width: 0; padding: 15px 20px; border-top: 1px solid #d5e3f1; }
+.command-row:nth-child(-n+2) { border-top: 0; }
+.command-row:nth-child(even) { border-left: 1px solid #d5e3f1; }
+.setting:last-child { border-bottom: 0; }
 .command { font-size: 23px; font-weight: 700; overflow-wrap: anywhere; }
-.description { font-size: 21px; color: #3f5c79; overflow-wrap: anywhere; }
+.description { margin-top: 5px; font-size: 20px; color: #3f5c79; overflow-wrap: anywhere; }
+.command-usage { margin-top: 2px; font-size: 18px; color: #526c86; }
 .setting { padding: 10px 6px; border-bottom: 1px solid var(--line); }
 .setting-line { display: grid; grid-template-columns: 190px 1fr auto; gap: 18px; align-items: center; }
 .name { font-size: 24px; font-weight: 700; }
@@ -84,7 +88,7 @@ h2 { font-size: 29px; line-height: 1.35; margin: 0; }
   <div class="section-heading"><span class="number">0{{index + 1}}</span><h2>{{section.title}}</h2><span class="permission">{{section.permission}}</span></div>
   <div class="commands">
   {{each section.items item}}
-    <div class="command-row"><div class="command">{{item.command}}</div><div class="description">{{item.description}}</div></div>
+    <div class="command-row"><div class="command">{{item.command}}</div><div class="description">{{item.description}}</div><div class="command-usage">{{item.usage}}</div></div>
   {{/each}}
   </div>
 </section>

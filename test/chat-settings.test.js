@@ -50,6 +50,33 @@ test('all setting examples, shorthand, explicit units and queries match the same
     assert.ok(panelText({ ...panel, version: 'test' }).includes(row.example));
   }
 });
+test('every help entry is a routed command and all editable settings have usable examples and ranges', () => {
+  const Plugin = class { constructor(options) { Object.assign(this, options); } };
+  const commands = new (createCommandPlugin(Plugin))();
+  const panel = helpPanel();
+  const text = panelText({ ...panel, version: 'test' });
+  const documentedKeys = new Set();
+  for (const section of panel.sections) {
+    assert.ok(section.permission);
+    assert.ok(text.includes(section.permission));
+    for (const item of section.items) {
+      const rule = commands.rule.find(rule => rule.reg.test(item.command));
+      assert.ok(rule, 'Unroutable help entry: ' + item.command);
+      assert.ok(item.description);
+      assert.ok(item.usage);
+      assert.ok(text.includes(item.command));
+      assert.ok(text.includes(item.usage));
+      if (rule.fnc !== 'settings') continue;
+      const parsed = parseSettingsCommand(item.command);
+      assert.ok(['view', 'query', 'set'].includes(parsed?.type), item.command);
+      if (parsed.type !== 'set' || item.command.endsWith('默认')) continue;
+      documentedKeys.add(parsed.item.key);
+      assert.ok(section.permission.includes('仅主人'));
+      assert.equal(item.usage, parsed.item.factor ? parsed.item.min + '–' + parsed.item.max + ' ' + parsed.item.unit : '开启 / 关闭');
+    }
+  }
+  assert.deepEqual(documentedKeys, new Set(chatSettings.map(item => item.key)));
+});
 test('invalid input cannot write arbitrary keys, accept prototype values, or leak submitted text', () => {
   for (const suffix of ['免艾特constructor', '图片艾特toString', '群回复窗口0', '群回复窗口301', '私聊回复窗口3601', '回复次数6', '请求超时1.5', '请求超时1e2', '图片上限201', '媒体上限-1', '请求超时30次', '回复次数3秒', '图片上限8MB', '图片上限8MiB多余', '群回复窗口999999999999999999999秒', 'appSecret SECRET_SENTINEL', '__proto__ 开启']) {
     const result = parseSettingsCommand('#QQBot设置' + suffix);
